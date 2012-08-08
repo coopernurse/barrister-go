@@ -82,7 +82,7 @@ type JsonRpcRequest struct {
 type JsonRpcError struct {
 	Code      int          `json:"code"`
 	Message   string       `json:"message"`
-   Data      interface{}  `json:"data,omitempty"`
+	Data      interface{}  `json:"data,omitempty"`
 }
 
 func (e *JsonRpcError) Error() string { 
@@ -93,6 +93,10 @@ type JsonRpcResponse struct {
     id      string
     result  interface{}  `json:"result,omitempty"`
     error   JsonRpcError `json:"error,omitempty"`
+}
+
+func NewServer(idl *Idl) Server {
+	return Server{idl, map[string]interface{}{} }
 }
 
 type Server struct {
@@ -181,10 +185,6 @@ func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcE
 	}
 
 	return ret0, nil
-}
-
-func NewServer(idl *Idl) Server {
-	return Server{idl, map[string]interface{}{} }
 }
 
 func ParseIdlJson(jsonData []byte) (*Idl, error) {
