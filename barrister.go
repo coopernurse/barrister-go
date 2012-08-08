@@ -79,27 +79,14 @@ type JsonRpcRequest struct {
     params interface{}
 }
 
-func parseMethod(method string) (string, string) {
-	i := strings.Index(method, ".")
-	if i > -1 && i < (len(method)-1) {
-		iface := method[0:i]
-		if i < (len(method)-2) {
-			return iface, strings.ToUpper(method[i+1:i+2]) + method[i+2:]
-		} else {
-			return iface, strings.ToUpper(method[i+1:]);
-		}
-	}
-	return method, ""
-}
-
 type JsonRpcError struct {
-   code      int
-   message   string
-   data      interface{}  `json:"data,omitempty"`
+	Code      int          `json:"code"`
+	Message   string       `json:"message"`
+   Data      interface{}  `json:"data,omitempty"`
 }
 
 func (e *JsonRpcError) Error() string { 
-	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.code, e.message);
+	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message);
 }
 
 type JsonRpcResponse struct {
@@ -124,7 +111,7 @@ func (s Server) InvokeJson(j []byte) []byte {
 	rpcReq := JsonRpcRequest{}
 	err := json.Unmarshal(j, &rpcReq)
 	if err != nil {
-		err := JsonRpcError{code:-32700, message:fmt.Sprintf("Unable to parse JSON: %s", err)}
+		err := JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
 		resp := JsonRpcResponse{id: rpcReq.id, error: err}
 		b, _ := json.Marshal(resp)
 		return b
@@ -153,22 +140,22 @@ func (s Server) InvokeJson(j []byte) []byte {
 }
 
 func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcError) {
-	iface, fname := parseMethod(method)
+	iface, fname := ParseMethod(method)
 
 	handler, ok := s.handlers[iface]; if !ok {
-		return nil, &JsonRpcError{code:-32601, message:fmt.Sprintf("No handler registered for interface: %s", iface)}
+		return nil, &JsonRpcError{Code:-32601, Message:fmt.Sprintf("No handler registered for interface: %s", iface)}
 	}
 
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
 	if fn == zeroVal {
-		return nil, &JsonRpcError{code:-32601, message:fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
+		return nil, &JsonRpcError{Code:-32601, Message:fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
 	}
 
 	// check args
 	fnType := fn.Type()
 	if fnType.NumIn() != len(args) {
-		return nil, &JsonRpcError{code:-32602, message:fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(args))}
+		return nil, &JsonRpcError{Code:-32602, Message:fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(args))}
 	}
 
 	// convert args
@@ -180,7 +167,7 @@ func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcE
 	// make the call
 	ret := fn.Call(argVals)
 	if len(ret) != 2 {
-		return nil, &JsonRpcError{code:-32603, message:fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))}
+		return nil, &JsonRpcError{Code:-32603, Message:fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))}
 	}
 
 	ret0 := ret[0].Interface()
@@ -188,7 +175,7 @@ func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcE
 
 	if ret1 != nil {
 		rpcErr, ok := ret1.(*JsonRpcError); if !ok {
-			return nil, &JsonRpcError{code:-32603, message:fmt.Sprintf("Method %s did not return JsonRpcError for last return val: %v", method, ret1)}
+			return nil, &JsonRpcError{Code:-32603, Message:fmt.Sprintf("Method %s did not return JsonRpcError for last return val: %v", method, ret1)}
 		}
 		return ret0, rpcErr
 	}
@@ -216,4 +203,17 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 	}
 
 	return idl, nil
+}
+
+func ParseMethod(method string) (string, string) {
+	i := strings.Index(method, ".")
+	if i > -1 && i < (len(method)-1) {
+		iface := method[0:i]
+		if i < (len(method)-2) {
+			return iface, strings.ToUpper(method[i+1:i+2]) + method[i+2:]
+		} else {
+			return iface, strings.ToUpper(method[i+1:]);
+		}
+	}
+	return method, ""
 }

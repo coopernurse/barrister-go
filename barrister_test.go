@@ -101,22 +101,86 @@ func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
 	return &s, nil
 }
 
-func TestServerCall(t *testing.T) {
+type EchoCall struct {
+	in  string
+	out interface{}
+}
+
+func TestServerCallSuccess(t *testing.T) {
 	bimpl := BImpl{}
 	idl := parseTestIdl()
 	svr := NewServer(idl)
 	svr.AddHandler("B", bimpl)
-	res, err := svr.Call("B.echo", "hi"); if err != nil {
-		panic(err)
+
+	calls := []EchoCall{
+		EchoCall{"hi", "hi"},
+		EchoCall{"2", "2"},
+		EchoCall{"return-null", nil},
 	}
 
-	resStr, ok := res.(*string); if !ok {
-		s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v", 
-			reflect.TypeOf(res).Name())
-		panic(s)
+	for _, call := range(calls) {
+		res, err := svr.Call("B.echo", call.in); if err != nil {
+			panic(err)
+		}
+
+		resStr, ok := res.(*string); if !ok {
+				s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v", 
+				reflect.TypeOf(res).Name())
+			panic(s)
+		}
+
+		if !((resStr == nil && call.out == nil) || (*resStr == call.out)) {
+			t.Errorf("B.echo %v != %v", resStr, call.out)
+		}
+	}
+}
+
+type CallFail struct {
+	method  string
+	errcode int
+}
+
+func TestServerCallFail(t *testing.T) {
+	bimpl := BImpl{}
+	idl := parseTestIdl()
+	svr := NewServer(idl)
+	svr.AddHandler("B", bimpl)
+
+	calls := []CallFail{
+		CallFail{"B.", -32601},
+		CallFail{"", -32601},
+		CallFail{"B.foo", -32601},
+		CallFail{"B.Echo", -32602},
 	}
 
-	if *resStr != "hi" {
-		t.Errorf("B.echo %s != hi", resStr)
+	for _, call := range(calls) {
+		res, err := svr.Call(call.method)
+		if res != nil {
+			t.Errorf("%v != nil on expected fail call: %s", res, call.method)
+		} else if err == nil {
+			t.Errorf("err == nil on expected fail call: %s", call.method)
+		} else if err.Code != call.errcode {
+			t.Errorf("errcode %d != %d on expected fail call: %s", err.Code, 
+				call.errcode, call.method)
+		}
+	}
+}
+
+func TestParseMethod(t *testing.T) {
+	cases := [][]string{
+		[]string{ "B.echo", "B", "Echo"},
+		[]string{ "B.", "B.", ""},
+		[]string{ "Cat.a", "Cat", "A"},
+		[]string{ "barrister-idl", "barrister-idl", ""},
+	}
+
+	for _, c := range(cases) {
+		iface, fname := ParseMethod(c[0])
+		if (iface != c[1]) {
+			t.Errorf("%s != %s for input: %s", iface, c[1], c[0])
+		}
+		if (fname != c[2]) {
+			t.Errorf("%s != %s for input: %s", fname, c[2], c[0])
+		}
 	}
 }
