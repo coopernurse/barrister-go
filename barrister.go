@@ -10,6 +10,28 @@ import (
 
 var zeroVal reflect.Value
 
+//////////////////////////////////////////////////
+// IDL //
+/////////
+
+func ParseIdlJson(jsonData []byte) (*Idl, error) {
+
+	elems := []IdlJsonElem{}
+	err := json.Unmarshal(jsonData, &elems)
+	if err != nil {
+		return nil, err
+	}
+
+	idl := &Idl{Elems: elems}
+	for _, el := range elems {
+		if el.Type == "meta" {
+			idl.Meta = Meta{el.BarristerVersion, el.DateGenerated * 1000000, el.Checksum}
+		}
+	}
+
+	return idl, nil
+}
+
 type IdlJsonElem struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
@@ -51,8 +73,8 @@ type Meta struct {
 }
 
 type Idl struct {
-	Elems []IdlJsonElem
-	Meta  Meta
+	Elems   []IdlJsonElem
+	Meta    Meta
 }
 
 func (idl *Idl) GenerateGo(pkgName string) []byte {
@@ -73,10 +95,14 @@ func (idl *Idl) GenerateGo(pkgName string) []byte {
 	return s.Bytes()
 }
 
+//////////////////////////////////////////////////
+// Request / Response //
+////////////////////////
+
 type JsonRpcRequest struct {
-    id     string
-    method string
-    params interface{}
+    Id     string
+    Method string
+    Params interface{}
 }
 
 type JsonRpcError struct {
@@ -89,11 +115,24 @@ func (e *JsonRpcError) Error() string {
 	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message);
 }
 
-type JsonRpcResponse struct {
-    id      string
-    result  interface{}  `json:"result,omitempty"`
-    error   JsonRpcError `json:"error,omitempty"`
+type BaseJsonRpcResponse struct {
+    Id      string
+    Error   JsonRpcError `json:"error,omitempty"`
 }
+
+type JsonRpcResponse struct {
+    Result  interface{}  `json:"result,omitempty"`
+	BaseJsonRpcResponse
+}
+
+type BarristerIdlRpcResponse struct {
+	Result []IdlJsonElem
+	BaseJsonRpcResponse
+}
+
+//////////////////////////////////////////////////
+// Server //
+////////////
 
 func NewServer(idl *Idl) Server {
 	return Server{idl, map[string]interface{}{} }
@@ -116,31 +155,47 @@ func (s Server) InvokeJson(j []byte) []byte {
 	err := json.Unmarshal(j, &rpcReq)
 	if err != nil {
 		err := JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
-		resp := JsonRpcResponse{id: rpcReq.id, error: err}
+		resp := JsonRpcResponse{}
+		resp.Id = rpcReq.Id
+		resp.Error = err
 		b, _ := json.Marshal(resp)
 		return b
 	}
 
-	// - handle 'barrister-idl' method
-	if rpcReq.method == "barrister-idl" {
+	var rpcerr *JsonRpcError
 
+	if rpcReq.Method == "barrister-idl" {
+		// handle 'barrister-idl' method
+		resp := BarristerIdlRpcResponse{Result: s.idl.Elems}
+		resp.Id = rpcReq.Id
+		b, err := json.Marshal(resp); if err != nil {
+			panic(err)
+		}
+		return b
 	} else {
-		s.Call(rpcReq.method, rpcReq.params)
+		// handle normal RPC method executions
+		result, rpcerr := s.Call(rpcReq.Method, rpcReq.Params)
+
+		if rpcerr == nil {
+			// successful Call
+			resp := JsonRpcResponse{Result: result}
+			resp.Id = rpcReq.Id
+			b, err := json.Marshal(resp)
+			if err == nil {
+				return b
+			}
+
+			msg := fmt.Sprintf("Unable to marshal response for method: %s - %v", rpcReq.Method, err)
+			rpcerr = &JsonRpcError{Code: -32603, Message: msg}
+		} 
 	}
 
-	//  - find handler based on method
-
-	//  - if found, marshal params to correct types, validating against idl
-	//  - invoke handler func using reflect
-
-	//ret := fn.Call(nil)
-	//if len(ret) > 0 && !ret[0].IsNil() {
-	//	return ret[0].Interface().(error)
-	//}
-
-	//  - marshal return val
-
-	return j
+	// RPC error occurred
+	resp := BaseJsonRpcResponse{Id: rpcReq.Id, Error: *rpcerr}
+	b, _ := json.Marshal(resp); if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcError) {
@@ -185,24 +240,6 @@ func (s Server) Call(method string, args ...interface{}) (interface{}, *JsonRpcE
 	}
 
 	return ret0, nil
-}
-
-func ParseIdlJson(jsonData []byte) (*Idl, error) {
-
-	elems := []IdlJsonElem{}
-	err := json.Unmarshal(jsonData, &elems)
-	if err != nil {
-		return nil, err
-	}
-
-	idl := &Idl{Elems: elems}
-	for _, el := range elems {
-		if el.Type == "meta" {
-			idl.Meta = Meta{el.BarristerVersion, el.DateGenerated * 1000000, el.Checksum}
-		}
-	}
-
-	return idl, nil
 }
 
 func ParseMethod(method string) (string, string) {

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 	"fmt"
+	"encoding/json"
 )
 
 func readFile(fname string) []byte {
@@ -16,9 +17,12 @@ func readFile(fname string) []byte {
 	return b
 }
 
+func readConformJson() []byte {
+	return readFile("test/conform.json")
+}
+
 func parseTestIdl() *Idl {
-	json := readFile("test/conform.json")
-	idl, err := ParseIdlJson(json)
+	idl, err := ParseIdlJson(readConformJson())
 	if err != nil {
 		panic(err)
 	}
@@ -104,6 +108,25 @@ func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
 type EchoCall struct {
 	in  string
 	out interface{}
+}
+
+func TestServerBarristerIdl(t *testing.T) {
+	idl := parseTestIdl()
+	svr := NewServer(idl)
+
+	rpcReq := JsonRpcRequest{Id:"123", Method:"barrister-idl", Params:""}
+	reqJson, _ := json.Marshal(rpcReq)
+	respJson := svr.InvokeJson(reqJson)
+	rpcResp := BarristerIdlRpcResponse{}
+	err := json.Unmarshal(respJson, &rpcResp); if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%v\n", rpcResp.Result)
+
+	if !reflect.DeepEqual(idl.Elems, rpcResp.Result) {
+		t.Errorf("idl: %v != %v", idl.Elems, rpcResp.Result)
+	}
 }
 
 func TestServerCallSuccess(t *testing.T) {
