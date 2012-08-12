@@ -10,6 +10,18 @@ import (
 
 var zeroVal reflect.Value
 
+type TypeError struct {
+    // string that describes location of value in the
+    // param or return value graph.  e.g. param[0].Addresses[0].Street1
+    path  string
+
+    msg   string
+}
+
+func (e *TypeError) Error() string {
+	return fmt.Sprintf("Type error: %s: %s", e.path, e.msg)
+}
+
 //////////////////////////////////////////////////
 // IDL //
 /////////
@@ -322,7 +334,7 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 		if kind == reflect.Ptr {
 			return reflect.ValueOf(nil), nil
 		} else {
-			return zeroVal, NewError("convert: " + path + " - Unable to convert nil to non-pointer")
+			return zeroVal, &TypeError{path, "Unable to convert nil to non-pointer"}
 		}
 	}
 
@@ -434,38 +446,7 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 		}
 	}
 
-	return zeroVal, NewError("Unable to " + goal)
-}
-
-func NewError(s string) *Error {
-	e := Error(s)
-	return &e
-}
-
-type Error string
-
-func (e *Error) Error() string {
-	return string(*e)
-}
-
-func capitalize(s string) string {
-	switch len(s) {
-	case 0:
-		return s
-	case 1:
-		return strings.ToUpper(s)
-	}
-	return strings.ToUpper(s[0:1])+s[1:]
-}
-
-func uncapitalize(s string) string {
-	switch len(s) {
-	case 0:
-		return s
-	case 1:
-		return strings.ToLower(s)
-	}
-	return strings.ToLower(s[0:1])+s[1:]
+	return zeroVal, &TypeError{path, "Unable to " + goal}
 }
 
 func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
@@ -539,4 +520,24 @@ func ParseMethod(method string) (string, string) {
 		}
 	}
 	return method, ""
+}
+
+func capitalize(s string) string {
+	switch len(s) {
+	case 0:
+		return s
+	case 1:
+		return strings.ToUpper(s)
+	}
+	return strings.ToUpper(s[0:1])+s[1:]
+}
+
+func uncapitalize(s string) string {
+	switch len(s) {
+	case 0:
+		return s
+	case 1:
+		return strings.ToLower(s)
+	}
+	return strings.ToLower(s[0:1])+s[1:]
 }
