@@ -133,12 +133,6 @@ func TestParseIdlJson(t *testing.T) {
 
 ///////////////////////////////
 
-type B interface {
-  // simply returns s 
-  // if s == "return-null" then you should return a null 
-  Echo(s string) *string 
-}
-
 type BImpl struct { }
 
 func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
@@ -297,5 +291,62 @@ func TestParseStuff(t *testing.T) {
 	target := map[string]interface{}{}
 	err := json.Unmarshal(s, &target); if err != nil {
 		panic(err)
+	}
+}
+
+type ConvertTest struct {
+	target interface{}
+	input  interface{}
+	ok     bool
+}
+
+type NoNesting struct {
+	A   string
+	B   int64
+	C   float64
+    D   bool
+	E   []string
+}
+
+type Nested struct {
+	Name  string
+	Nest  NoNesting
+}
+
+func TestConvert(t *testing.T) {
+
+	cases := []ConvertTest{
+		ConvertTest{"hi", "hi", true},
+		ConvertTest{"", 10, false},
+		ConvertTest{NoNesting{A:"hi",B:30}, map[string]interface{}{ "A":"hi", "B":30}, true},
+		ConvertTest{NoNesting{}, map[string]interface{}{ "A":"hi", "B":"foo"}, false},
+		ConvertTest{NoNesting{C:3.2, D:true}, map[string]interface{}{ "C":3.2, "D":true}, true},
+		ConvertTest{NoNesting{C:2.8, D:false}, map[string]interface{}{ "C":2.8, "D":false}, true},
+		ConvertTest{NoNesting{E:[]string{"a","b"}}, map[string]interface{}{ "e":[]string{"a","b"}}, true},
+		ConvertTest{Nested{Name:"hi",Nest:NoNesting{B:30}}, map[string]interface{}{ "name":"hi", "Nest":map[string]interface{}{"B":30.0}}, true},
+	}
+
+	for x, test := range(cases) {
+		msg := fmt.Sprintf("TestConvert[%d]", x)
+		targetType := reflect.TypeOf(test.target)
+		val, err := Convert(targetType, test.input, msg)
+		if test.ok {
+			if err != nil {
+				t.Errorf("%s - Couldn't convert %v to %v: %v", 
+					msg, test.input, reflect.TypeOf(test.target).Name(), err)
+			} else {
+				if val.Kind() == reflect.Ptr {
+					val = val.Elem()
+				}
+				if val.Type() != targetType {
+					t.Errorf("%s - Return type: %v != %v", msg, val.Type(), targetType)
+				} else if !reflect.DeepEqual(val.Interface(), test.target) {
+					t.Errorf("%s - Expected %v but was %v", msg, test.input, val.Interface())
+				}
+			}
+		} else if err == nil {
+			t.Errorf("%s - Expected err converting %v to %v, but it worked: %v", 
+				msg, test.input, reflect.TypeOf(test.target).Name(), val)
+		}
 	}
 }

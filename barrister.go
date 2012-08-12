@@ -315,9 +315,157 @@ func (s Server) InvokeJson(j []byte) []byte {
 	return b
 }
 
-func Convert(desired reflect.Type, actual interface{}) (reflect.Value, error) {
-	//fmt.Printf("Convert: %s to %s\n", reflect.TypeOf(actual).Name(), desired.Name())
-	return reflect.ValueOf(actual), nil
+func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Value, error) {
+	kind := desired.Kind()
+
+	if actual == nil {
+		if kind == reflect.Ptr {
+			return reflect.ValueOf(nil), nil
+		} else {
+			return zeroVal, NewError("convert: " + path + " - Unable to convert nil to non-pointer")
+		}
+	}
+
+	goal := fmt.Sprintf("convert: %v - %v to %s", path, reflect.TypeOf(actual).Kind().String(), kind.String())
+	fmt.Printf("%s\n", goal)
+
+	switch kind {
+	case reflect.String:
+		s, ok := actual.(string)
+		if ok {
+			return reflect.ValueOf(s), nil
+		}
+	case reflect.Int:
+		s, ok := actual.(int)
+		if ok {
+			return reflect.ValueOf(s), nil
+		}
+		s2, ok := actual.(int64)
+		if ok {
+			return reflect.ValueOf(int(s2)), nil
+		}
+	case reflect.Int64:
+		s, ok := actual.(int64)
+		if ok {
+			return reflect.ValueOf(s), nil
+		}
+		s2, ok := actual.(int)
+		if ok {
+			return reflect.ValueOf(int64(s2)), nil
+		}
+		s3, ok := actual.(float64)
+		if ok {
+			s4 := int64(s3)
+			if float64(s4) == s3 {
+				return reflect.ValueOf(s4), nil
+			}
+		}
+	case reflect.Float32:
+		s, ok := actual.(float32)
+		if ok {
+			return reflect.ValueOf(s), nil
+		}
+	case reflect.Float64:
+		s, ok := actual.(float64)
+		if ok {
+			return reflect.ValueOf(s), nil
+		}
+		s2, ok := actual.(float32)
+		if ok {
+			return reflect.ValueOf(float64(s2)), nil
+		}
+	case reflect.Bool:
+		b, ok := actual.(bool)
+		if ok {
+			return reflect.ValueOf(b), nil
+		}
+	case reflect.Slice:
+		actVal := reflect.ValueOf(actual)
+		actType := actVal.Type()
+		if actType.Kind() == reflect.Slice {
+			sliceType := desired.Elem()
+			sliceV := reflect.New(desired)
+			slice := sliceV.Elem()
+			for x := 0; x < actVal.Len(); x++ {
+				el := actVal.Index(x)
+				pathCh := fmt.Sprintf("%s[%d]", path, x)
+				conv, err := Convert(sliceType, el.Interface(), pathCh)
+				if err != nil {
+					return zeroVal, err
+				}
+				slice = reflect.Append(slice, conv)
+			}
+			return slice, nil
+		}
+	case reflect.Struct:
+		m, ok := actual.(map[string]interface{})
+		if ok {
+			val := reflect.New(desired)
+			num := desired.NumField()
+			for i := 0; i < num; i++ {
+				fieldType := desired.Field(i)
+				key := fieldType.Name
+				mval, ok := m[key]
+				if !ok {
+					mval, ok = m[uncapitalize(key)]
+				}
+				if ok {
+					conv, err := Convert(fieldType.Type, mval, path+"."+key)
+					if err != nil {
+						return zeroVal, err
+					}
+					f := val.Elem().Field(i)
+					if f.Kind() == reflect.Ptr {
+						if conv.Kind() == reflect.Ptr {
+							f.Set(conv)
+						} else {
+							f.Set(conv.Addr())
+						}
+					} else {
+						if conv.Kind() == reflect.Ptr {
+							f.Set(conv.Elem())
+						} else {
+							f.Set(conv)
+						}
+					}
+				}
+			}
+			return val, nil
+		}
+	}
+
+	return zeroVal, NewError("Unable to " + goal)
+}
+
+func NewError(s string) *Error {
+	e := Error(s)
+	return &e
+}
+
+type Error string
+
+func (e *Error) Error() string {
+	return string(*e)
+}
+
+func capitalize(s string) string {
+	switch len(s) {
+	case 0:
+		return s
+	case 1:
+		return strings.ToUpper(s)
+	}
+	return strings.ToUpper(s[0:1])+s[1:]
+}
+
+func uncapitalize(s string) string {
+	switch len(s) {
+	case 0:
+		return s
+	case 1:
+		return strings.ToLower(s)
+	}
+	return strings.ToLower(s[0:1])+s[1:]
 }
 
 func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
@@ -348,7 +496,8 @@ func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRp
 	paramVals := []reflect.Value{}
 	for x, param := range params {
 		desiredType := fnType.In(x)
-		converted, err := Convert(desiredType, param)
+		path := fmt.Sprintf("param[%d]", x)
+		converted, err := Convert(desiredType, param, path)
 		if err != nil {
 			return nil, &JsonRpcError{Code:-32602, Message: err.Error()}
 		}
