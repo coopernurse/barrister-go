@@ -194,7 +194,7 @@ func TestServerBarristerIdl(t *testing.T) {
 
 	rpcReq := JsonRpcRequest{Id:"123", Method:"barrister-idl", Params:""}
 	reqJson, _ := json.Marshal(rpcReq)
-	respJson := svr.InvokeJson(reqJson)
+	respJson := svr.InvokeJSON(reqJson)
 	rpcResp := BarristerIdlRpcResponse{}
 	err := json.Unmarshal(respJson, &rpcResp); if err != nil {
 		panic(err)
@@ -348,5 +348,53 @@ func TestConvert(t *testing.T) {
 			t.Errorf("%s - Expected err converting %v to %v, but it worked: %v", 
 				msg, test.input, reflect.TypeOf(test.target).Name(), val)
 		}
+	}
+}
+
+func TestServerInvokeJSONSuccess(t *testing.T) {
+	bimpl := BImpl{}
+	idl := parseTestIdl()
+	svr := NewServer(idl)
+	svr.AddHandler("B", bimpl)
+
+	calls := []EchoCall{
+		EchoCall{"hi", "hi"},
+		EchoCall{"2", "2"},
+		EchoCall{"return-null", nil},
+	}
+
+	for _, call := range(calls) {
+		req := JsonRpcRequest{Id:"123", Method: "B.echo", Params: []interface{}{call.in} }
+		reqBytes, err := json.Marshal(req); if err != nil {
+			panic(err)
+		}
+
+		resBytes := svr.InvokeJSON(reqBytes)
+		resp := JsonRpcResponse{}
+		err = json.Unmarshal(resBytes, &resp); if err != nil {
+			panic(err)
+		}
+
+		if resp.Error != nil {
+			t.Errorf("B.echo %v returned err: %v", call.in, resp.Error)
+		} else {
+			res := resp.Result
+			if res == nil {
+				if call.out != nil {
+					t.Errorf("B.echo nil != %v", call.out)
+				}
+			} else {
+				resStr, ok := res.(string)
+				if !ok {
+					n := reflect.TypeOf(res).Name()
+					t.Errorf("B.echo return val cannot be converted to string. type=%v", n)
+				}
+
+				if resStr != call.out {
+					t.Errorf("B.echo %v != %v", resStr, call.out)
+				}
+			}
+		}
+
 	}
 }
