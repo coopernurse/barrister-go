@@ -244,19 +244,16 @@ func (e *JsonRpcError) Error() string {
 	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message);
 }
 
-type BaseJsonRpcResponse struct {
-    Id      string
-    Error   JsonRpcError `json:"error,omitempty"`
-}
-
 type JsonRpcResponse struct {
+    Id      string        `json:"id"`
+    Error   *JsonRpcError `json:"error,omitempty"`
     Result  interface{}  `json:"result,omitempty"`
-	BaseJsonRpcResponse
 }
 
 type BarristerIdlRpcResponse struct {
+    Id      string        `json:"id"`
+    Error   *JsonRpcError `json:"error,omitempty"`
 	Result []IdlJsonElem
-	BaseJsonRpcResponse
 }
 
 //////////////////////////////////////////////////
@@ -277,13 +274,13 @@ func (s Server) AddHandler(iface string, impl interface{}) {
 	s.handlers[iface] = impl
 }
 
-func (s Server) InvokeJson(j []byte) []byte {
+func (s Server) InvokeJSON(j []byte) []byte {
 
 	//  - parse json into JsonRpcRequest
 	rpcReq := JsonRpcRequest{}
 	err := json.Unmarshal(j, &rpcReq)
 	if err != nil {
-		err := JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
+		err := &JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
 		resp := JsonRpcResponse{}
 		resp.Id = rpcReq.Id
 		resp.Error = err
@@ -303,8 +300,13 @@ func (s Server) InvokeJson(j []byte) []byte {
 		return b
 	} else {
 		// handle normal RPC method executions
-		result, rpcerr := s.Call(rpcReq.Method, rpcReq.Params)
-
+		var result interface{}
+		arr, ok := rpcReq.Params.([]interface{})
+		if ok {
+			result, rpcerr = s.Call(rpcReq.Method, arr...)
+		} else {
+			result, rpcerr = s.Call(rpcReq.Method, rpcReq.Params)
+		}
 		if rpcerr == nil {
 			// successful Call
 			resp := JsonRpcResponse{Result: result}
@@ -316,11 +318,11 @@ func (s Server) InvokeJson(j []byte) []byte {
 
 			msg := fmt.Sprintf("Unable to marshal response for method: %s - %v", rpcReq.Method, err)
 			rpcerr = &JsonRpcError{Code: -32603, Message: msg}
-		} 
+		}
 	}
 
 	// RPC error occurred
-	resp := BaseJsonRpcResponse{Id: rpcReq.Id, Error: *rpcerr}
+	resp := JsonRpcResponse{Id: rpcReq.Id, Error: rpcerr}
 	b, _ := json.Marshal(resp); if err != nil {
 		panic(err)
 	}
@@ -339,7 +341,7 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 	}
 
 	goal := fmt.Sprintf("convert: %v - %v to %s", path, reflect.TypeOf(actual).Kind().String(), kind.String())
-	fmt.Printf("%s\n", goal)
+	//fmt.Printf("%s\n", goal)
 
 	switch kind {
 	case reflect.String:
