@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"reflect"
+	"math/rand"
+	"net/http"
+	"io/ioutil"
+	"time"
 )
 
 var zeroVal reflect.Value
@@ -20,6 +25,30 @@ type TypeError struct {
 
 func (e *TypeError) Error() string {
 	return fmt.Sprintf("Type error: %s: %s", e.path, e.msg)
+}
+
+
+func EncodeASCII(b []byte) (string, error) {
+	in := bytes.NewBuffer(b)
+	out := bytes.NewBufferString("")
+	for {
+		r, size, err := in.ReadRune()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+
+		if size == 1 {
+			out.WriteRune(r)
+		} else if size == 2 {
+			out.WriteString(fmt.Sprintf("\\u%04x", r))
+		} else {
+			out.WriteString(fmt.Sprintf("\\U%08x", r))
+		}
+	}
+	return out.String(), nil
 }
 
 //////////////////////////////////////////////////
@@ -229,9 +258,10 @@ func (idl *Idl) GenerateGo(pkgName string) []byte {
 ////////////////////////
 
 type JsonRpcRequest struct {
-    Id     string
-    Method string
-    Params interface{}
+	Jsonrpc string      `json:"jsonrpc"`
+    Id     string       `json:"id"`
+    Method string       `json:"method"`
+    Params interface{}  `json:"params"`
 }
 
 type JsonRpcError struct {
@@ -257,6 +287,75 @@ type BarristerIdlRpcResponse struct {
 }
 
 //////////////////////////////////////////////////
+// Client //
+////////////
+
+func randStr(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := bytes.Buffer{}
+	for i := 0; i < length; i++ {
+		x := rand.Int31n(36)
+		if x < 10 {
+			b.WriteString(string(48+x))
+		} else {
+			b.WriteString(string(87+x))
+		}
+	}
+	return b.String()
+}
+
+type Transport interface {
+	Call(method string, params ...interface{}) (interface{}, *JsonRpcError)
+}
+
+type HttpTransport struct {
+	Url    string
+}
+
+func (t *HttpTransport) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+	jsonReq := JsonRpcRequest{ Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params }
+	post, err := json.Marshal(jsonReq)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("req body:\n%s\n", post)
+
+	req, err := http.NewRequest("POST", "http://localhost:9233", bytes.NewBuffer(post))
+	if err != nil {
+		panic(err)
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonResp := JsonRpcResponse{}
+
+	fmt.Printf("resp body:\n%s\n", body)
+
+	err = json.Unmarshal(body, &jsonResp)
+	if err != nil {
+		panic(err)
+	}
+
+	if jsonResp.Error != nil {
+		return nil, jsonResp.Error
+	}
+
+	return jsonResp.Result, nil
+}
+
+//////////////////////////////////////////////////
 // Server //
 ////////////
 
@@ -277,7 +376,7 @@ func (s Server) AddHandler(iface string, impl interface{}) {
 func (s Server) InvokeJSON(j []byte) []byte {
 
 	//  - parse json into JsonRpcRequest
-	rpcReq := JsonRpcRequest{}
+	rpcReq := JsonRpcRequest{Jsonrpc:"2.0"}
 	err := json.Unmarshal(j, &rpcReq)
 	if err != nil {
 		err := &JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
