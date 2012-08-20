@@ -283,7 +283,7 @@ type JsonRpcResponse struct {
 type BarristerIdlRpcResponse struct {
     Id      string        `json:"id"`
     Error   *JsonRpcError `json:"error,omitempty"`
-	Result []IdlJsonElem
+    Result  []IdlJsonElem `json:"result,omitempty"`
 }
 
 //////////////////////////////////////////////////
@@ -368,35 +368,64 @@ type Server struct {
 	handlers    map[string]interface{}
 }
 
-func (s Server) AddHandler(iface string, impl interface{}) {
+func (s *Server) AddHandler(iface string, impl interface{}) {
 	// TODO: verify that iface is in the idl
 	s.handlers[iface] = impl
 }
 
-func (s Server) InvokeJSON(j []byte) []byte {
+func (s *Server) InvokeJSON(j []byte) []byte {
 
-	//  - parse json into JsonRpcRequest
-	rpcReq := JsonRpcRequest{Jsonrpc:"2.0"}
-	err := json.Unmarshal(j, &rpcReq)
-	if err != nil {
-		err := &JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err)}
-		resp := JsonRpcResponse{}
-		resp.Id = rpcReq.Id
-		resp.Error = err
-		b, _ := json.Marshal(resp)
+	// determine if batch or single
+	batch := false
+	for i := 0; i < len(j); i++ {
+		if j[i] == '{' {
+			break
+		} else if j[i] == '[' {
+			batch = true
+			break
+		}
+	}
+
+	if batch {
+		var batchReq []JsonRpcRequest
+		batchResp := []JsonRpcResponse{}
+		err := json.Unmarshal(j, &batchReq)
+		if err != nil {
+			return jsonParseErr("", err)
+		}
+
+		for _, req := range(batchReq) {
+			resp := s.InvokeOne(&req)
+			batchResp = append(batchResp, *resp)
+		}
+
+		b, _ := json.Marshal(batchResp); if err != nil {
+			panic(err)
+		}
 		return b
 	}
 
+	//  - parse json into JsonRpcRequest
+	rpcReq := JsonRpcRequest{}
+	err := json.Unmarshal(j, &rpcReq)
+	if err != nil {
+		return jsonParseErr("", err)
+	}
+
+	resp := s.InvokeOne(&rpcReq)
+
+	b, _ := json.Marshal(resp); if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 	var rpcerr *JsonRpcError
 
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
-		resp := BarristerIdlRpcResponse{Result: s.idl.Elems}
-		resp.Id = rpcReq.Id
-		b, err := json.Marshal(resp); if err != nil {
-			panic(err)
-		}
-		return b
+		return &JsonRpcResponse{Id: rpcReq.Id, Result: s.idl.Elems}
 	} else {
 		// handle normal RPC method executions
 		var result interface{}
@@ -410,147 +439,16 @@ func (s Server) InvokeJSON(j []byte) []byte {
 			// successful Call
 			resp := JsonRpcResponse{Result: result}
 			resp.Id = rpcReq.Id
-			b, err := json.Marshal(resp)
-			if err == nil {
-				return b
-			}
-
-			msg := fmt.Sprintf("Unable to marshal response for method: %s - %v", rpcReq.Method, err)
-			rpcerr = &JsonRpcError{Code: -32603, Message: msg}
+			return &resp
 		}
 	}
 
 	// RPC error occurred
-	resp := JsonRpcResponse{Id: rpcReq.Id, Error: rpcerr}
-	b, _ := json.Marshal(resp); if err != nil {
-		panic(err)
-	}
-	return b
+	return &JsonRpcResponse{Id: rpcReq.Id, Error: rpcerr}
 }
 
-func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Value, error) {
-	kind := desired.Kind()
 
-	if actual == nil {
-		if kind == reflect.Ptr {
-			return reflect.ValueOf(nil), nil
-		} else {
-			return zeroVal, &TypeError{path, "Unable to convert nil to non-pointer"}
-		}
-	}
-
-	goal := fmt.Sprintf("convert: %v - %v to %s", path, reflect.TypeOf(actual).Kind().String(), kind.String())
-	//fmt.Printf("%s\n", goal)
-
-	switch kind {
-	case reflect.String:
-		s, ok := actual.(string)
-		if ok {
-			return reflect.ValueOf(s), nil
-		}
-	case reflect.Int:
-		s, ok := actual.(int)
-		if ok {
-			return reflect.ValueOf(s), nil
-		}
-		s2, ok := actual.(int64)
-		if ok {
-			return reflect.ValueOf(int(s2)), nil
-		}
-	case reflect.Int64:
-		s, ok := actual.(int64)
-		if ok {
-			return reflect.ValueOf(s), nil
-		}
-		s2, ok := actual.(int)
-		if ok {
-			return reflect.ValueOf(int64(s2)), nil
-		}
-		s3, ok := actual.(float64)
-		if ok {
-			s4 := int64(s3)
-			if float64(s4) == s3 {
-				return reflect.ValueOf(s4), nil
-			}
-		}
-	case reflect.Float32:
-		s, ok := actual.(float32)
-		if ok {
-			return reflect.ValueOf(s), nil
-		}
-	case reflect.Float64:
-		s, ok := actual.(float64)
-		if ok {
-			return reflect.ValueOf(s), nil
-		}
-		s2, ok := actual.(float32)
-		if ok {
-			return reflect.ValueOf(float64(s2)), nil
-		}
-	case reflect.Bool:
-		b, ok := actual.(bool)
-		if ok {
-			return reflect.ValueOf(b), nil
-		}
-	case reflect.Slice:
-		actVal := reflect.ValueOf(actual)
-		actType := actVal.Type()
-		if actType.Kind() == reflect.Slice {
-			sliceType := desired.Elem()
-			sliceV := reflect.New(desired)
-			slice := sliceV.Elem()
-			for x := 0; x < actVal.Len(); x++ {
-				el := actVal.Index(x)
-				pathCh := fmt.Sprintf("%s[%d]", path, x)
-				conv, err := Convert(sliceType, el.Interface(), pathCh)
-				if err != nil {
-					return zeroVal, err
-				}
-				slice = reflect.Append(slice, conv)
-			}
-			return slice, nil
-		}
-	case reflect.Struct:
-		m, ok := actual.(map[string]interface{})
-		if ok {
-			val := reflect.New(desired)
-			num := desired.NumField()
-			for i := 0; i < num; i++ {
-				fieldType := desired.Field(i)
-				key := fieldType.Name
-				mval, ok := m[key]
-				if !ok {
-					mval, ok = m[uncapitalize(key)]
-				}
-				if ok {
-					conv, err := Convert(fieldType.Type, mval, path+"."+key)
-					if err != nil {
-						return zeroVal, err
-					}
-					f := val.Elem().Field(i)
-					if f.Kind() == reflect.Ptr {
-						if conv.Kind() == reflect.Ptr {
-							f.Set(conv)
-						} else {
-							f.Set(conv.Addr())
-						}
-					} else {
-						if conv.Kind() == reflect.Ptr {
-							f.Set(conv.Elem())
-						} else {
-							f.Set(conv)
-						}
-					}
-				}
-			}
-			return val, nil
-		}
-	}
-
-	return zeroVal, &TypeError{path, "Unable to " + goal}
-}
-
-func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
 	iface, fname := ParseMethod(method)
 
 	handler, ok := s.handlers[iface]; if !ok {
@@ -584,6 +482,7 @@ func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRp
 			return nil, &JsonRpcError{Code:-32602, Message: err.Error()}
 		}
 		paramVals = append(paramVals, converted)
+		fmt.Printf("%s - %v\n", path, reflect.TypeOf(converted.Interface()))
 	}
 
 	// make the call
@@ -608,6 +507,166 @@ func (s Server) Call(method string, params ...interface{}) (interface{}, *JsonRp
 	}
 
 	return ret0, nil
+}
+
+func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Value, error) {
+	kind := desired.Kind()
+
+	if actual == nil {
+		if kind == reflect.Ptr {
+			return reflect.ValueOf(nil), nil
+		} else {
+			return zeroVal, &TypeError{path, "Unable to convert nil to non-pointer"}
+		}
+	}
+
+	actType := reflect.TypeOf(actual)
+
+	goal := fmt.Sprintf("convert: %v - %v to %v", path, actType.Kind().String(), desired)
+	fmt.Printf("%s\n", goal)
+
+	if actType == desired {
+		return reflect.ValueOf(actual), nil
+	}
+
+	desirePtr := false
+	if kind == reflect.Ptr {
+		desirePtr = true
+		desired = desired.Elem()
+		kind = desired.Kind()
+	}
+
+	if actType.Kind() == kind {
+		//fmt.Printf("%v is assignable to %v\n", actType, desired)
+		v := reflect.New(desired).Elem()
+		switch kind {
+		case reflect.String:
+			s, ok := actual.(string)
+			if ok {
+				v.SetString(s)
+				return returnVal(v, desirePtr)
+			}
+		}
+	} else {
+		//fmt.Printf("%v is NOT assignable to %v\n", actType, desired)
+	}
+
+	switch kind {
+	case reflect.String:
+		s, ok := actual.(string)
+		if ok {
+			return returnVal(reflect.ValueOf(string(s)), desirePtr)
+		}
+	case reflect.Int:
+		s, ok := actual.(int)
+		if ok {
+			return returnVal(reflect.ValueOf(s), desirePtr)
+		}
+		s2, ok := actual.(int64)
+		if ok {
+			return returnVal(reflect.ValueOf(int(s2)), desirePtr)
+		}
+	case reflect.Int64:
+		s, ok := actual.(int64)
+		if ok {
+			return returnVal(reflect.ValueOf(s), desirePtr)
+		}
+		s2, ok := actual.(int)
+		if ok {
+			return returnVal(reflect.ValueOf(int64(s2)), desirePtr)
+		}
+		s3, ok := actual.(float64)
+		if ok {
+			s4 := int64(s3)
+			if float64(s4) == s3 {
+				return returnVal(reflect.ValueOf(s4), desirePtr)
+			}
+		}
+	case reflect.Float32:
+		s, ok := actual.(float32)
+		if ok {
+			return returnVal(reflect.ValueOf(s), desirePtr)
+		}
+	case reflect.Float64:
+		s, ok := actual.(float64)
+		if ok {
+			return returnVal(reflect.ValueOf(s), desirePtr)
+		}
+		s2, ok := actual.(float32)
+		if ok {
+			return returnVal(reflect.ValueOf(float64(s2)), desirePtr)
+		}
+	case reflect.Bool:
+		b, ok := actual.(bool)
+		if ok {
+			return returnVal(reflect.ValueOf(b), desirePtr)
+		}
+	case reflect.Slice:
+		actVal := reflect.ValueOf(actual)
+		actType := actVal.Type()
+		if actType.Kind() == reflect.Slice {
+			return convertSlice(desired, actVal, path)
+		}
+	case reflect.Struct:
+		m, ok := actual.(map[string]interface{})
+		if ok {
+			return convertStruct(desired, m, desirePtr, path)
+		}
+	}
+
+	return zeroVal, &TypeError{path, "Unable to " + goal}
+}
+
+func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (reflect.Value, error) { 
+	sliceType := desired.Elem()
+	sliceV := reflect.New(desired)
+	slice := sliceV.Elem()
+	for x := 0; x < actVal.Len(); x++ {
+		el := actVal.Index(x)
+		pathCh := fmt.Sprintf("%s[%d]", path, x)
+		conv, err := Convert(sliceType, el.Interface(), pathCh)
+		if err != nil {
+			return zeroVal, err
+		}
+		slice = reflect.Append(slice, conv)
+	}
+	return slice, nil
+}
+
+func convertStruct(desired reflect.Type, m map[string]interface{}, 
+	desirePtr bool, path string) (reflect.Value, error) { 
+
+	val := reflect.New(desired)
+	num := desired.NumField()
+	for i := 0; i < num; i++ {
+		fieldType := desired.Field(i)
+		key := fieldType.Name
+		mval, ok := m[key]
+		if !ok {
+			mval, ok = m[uncapitalize(key)]
+		}
+		if ok {
+			conv, err := Convert(fieldType.Type, mval, path+"."+key)
+			if err != nil {
+				return zeroVal, err
+			}
+			f := val.Elem().Field(i)
+			if f.Kind() == reflect.Ptr {
+				if conv.Kind() == reflect.Ptr {
+					f.Set(conv)
+				} else {
+					f.Set(conv.Addr())
+				}
+			} else {
+				if conv.Kind() == reflect.Ptr {
+					f.Set(conv.Elem())
+				} else {
+					f.Set(conv)
+				}
+			}
+		}
+	}
+	return returnVal(val.Elem(), desirePtr)
 }
 
 func ParseMethod(method string) (string, string) {
@@ -641,4 +700,20 @@ func uncapitalize(s string) string {
 		return strings.ToLower(s)
 	}
 	return strings.ToLower(s[0:1])+s[1:]
+}
+
+func jsonParseErr(reqId string, err error) []byte {
+	rpcerr := &JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err.Error())}
+	resp := JsonRpcResponse{}
+	resp.Id = reqId
+	resp.Error = rpcerr
+	b, _ := json.Marshal(resp)
+	return b
+}
+
+func returnVal(val reflect.Value, desirePtr bool) (reflect.Value, error) {
+	if desirePtr {
+		return val.Addr(), nil
+	}
+	return val, nil
 }

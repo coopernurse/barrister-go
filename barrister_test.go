@@ -308,6 +308,8 @@ type NoNesting struct {
 	E   []string
 }
 
+type StringAlias string
+
 type Nested struct {
 	Name  string
 	Nest  NoNesting
@@ -318,6 +320,7 @@ func TestConvert(t *testing.T) {
 	cases := []ConvertTest{
 		ConvertTest{"hi", "hi", true},
 		ConvertTest{"", 10, false},
+		ConvertTest{StringAlias("blah"), "blah", true},
 		ConvertTest{NoNesting{A:"hi",B:30}, map[string]interface{}{ "A":"hi", "B":30}, true},
 		ConvertTest{NoNesting{}, map[string]interface{}{ "A":"hi", "B":"foo"}, false},
 		ConvertTest{NoNesting{C:3.2, D:true}, map[string]interface{}{ "C":3.2, "D":true}, true},
