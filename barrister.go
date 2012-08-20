@@ -275,6 +275,7 @@ func (e *JsonRpcError) Error() string {
 }
 
 type JsonRpcResponse struct {
+	Jsonrpc string       `json:"jsonrpc"`
 	Id     string        `json:"id"`
 	Error  *JsonRpcError `json:"error,omitempty"`
 	Result interface{}   `json:"result,omitempty"`
@@ -290,38 +291,24 @@ type BarristerIdlRpcResponse struct {
 // Client //
 ////////////
 
-func randStr(length int) string {
-	rand.Seed(time.Now().UnixNano())
-	b := bytes.Buffer{}
-	for i := 0; i < length; i++ {
-		x := rand.Int31n(36)
-		if x < 10 {
-			b.WriteString(string(48 + x))
-		} else {
-			b.WriteString(string(87 + x))
-		}
-	}
-	return b.String()
-}
-
 type Transport interface {
 	Call(method string, params ...interface{}) (interface{}, *JsonRpcError)
+	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
 }
 
 type HttpTransport struct {
 	Url string
 }
 
-func (t *HttpTransport) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
-	jsonReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
+func (t *HttpTransport) post(jsonReq interface{}) []byte {
 	post, err := json.Marshal(jsonReq)
 	if err != nil {
 		panic(err)
 	}
 
-	//fmt.Printf("req body:\n%s\n", post)
+	//fmt.Printf("request:\n%s\n", post)
 
-	req, err := http.NewRequest("POST", "http://localhost:9233", bytes.NewBuffer(post))
+	req, err := http.NewRequest("POST", t.Url, bytes.NewBuffer(post))
 	if err != nil {
 		panic(err)
 	}
@@ -339,11 +326,31 @@ func (t *HttpTransport) Call(method string, params ...interface{}) (interface{},
 		panic(err)
 	}
 
+	//fmt.Printf("%s\n\n", body)
+
+	return body
+}
+
+func (t *HttpTransport) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
+	respBytes := t.post(batch)
+
+	var batchResp []JsonRpcResponse
+	err := json.Unmarshal(respBytes, &batchResp)
+	if err != nil {
+		panic(err)
+	}
+
+	return batchResp
+}
+
+func (t *HttpTransport) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+	jsonReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
+
+	respBytes := t.post(jsonReq)
+
 	jsonResp := JsonRpcResponse{}
 
-	//fmt.Printf("resp body:\n%s\n", body)
-
-	err = json.Unmarshal(body, &jsonResp)
+	err := json.Unmarshal(respBytes, &jsonResp)
 	if err != nil {
 		panic(err)
 	}
@@ -427,7 +434,7 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
-		return &JsonRpcResponse{Id: rpcReq.Id, Result: s.idl.Elems}
+		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.Elems}
 	} else {
 		// handle normal RPC method executions
 		var result interface{}
@@ -439,14 +446,12 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 		}
 		if rpcerr == nil {
 			// successful Call
-			resp := JsonRpcResponse{Result: result}
-			resp.Id = rpcReq.Id
-			return &resp
+			return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: result}
 		}
 	}
 
 	// RPC error occurred
-	return &JsonRpcResponse{Id: rpcReq.Id, Error: rpcerr}
+	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: rpcerr}
 }
 
 func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
@@ -457,10 +462,10 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("No handler registered for interface: %s", iface)}
 	}
 
-	err := s.idl.ValidateParams(method, params...)
-	if err != nil {
-		return nil, err
-	}
+	//err := s.idl.ValidateParams(method, params...)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
@@ -504,10 +509,10 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return ret0, rpcErr
 	}
 
-	err = s.idl.ValidateResult(method, ret0)
-	if err != nil {
-		return nil, err
-	}
+	//err = s.idl.ValidateResult(method, ret0)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	return ret0, nil
 }
@@ -707,7 +712,7 @@ func uncapitalize(s string) string {
 
 func jsonParseErr(reqId string, err error) []byte {
 	rpcerr := &JsonRpcError{Code: -32700, Message: fmt.Sprintf("Unable to parse JSON: %s", err.Error())}
-	resp := JsonRpcResponse{}
+	resp := JsonRpcResponse{Jsonrpc: "2.0"}
 	resp.Id = reqId
 	resp.Error = rpcerr
 	b, _ := json.Marshal(resp)
@@ -719,4 +724,18 @@ func returnVal(val reflect.Value, desirePtr bool) (reflect.Value, error) {
 		return val.Addr(), nil
 	}
 	return val, nil
+}
+
+func randStr(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := bytes.Buffer{}
+	for i := 0; i < length; i++ {
+		x := rand.Int31n(36)
+		if x < 10 {
+			b.WriteString(string(48 + x))
+		} else {
+			b.WriteString(string(87 + x))
+		}
+	}
+	return b.String()
 }
