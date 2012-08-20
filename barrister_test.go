@@ -1,12 +1,12 @@
 package barrister_test
 
 import (
+	"encoding/json"
+	"fmt"
 	. "github.com/coopernurse/barrister-go"
 	"io/ioutil"
 	"reflect"
 	"testing"
-	"fmt"
-	"encoding/json"
 )
 
 func readFile(fname string) []byte {
@@ -32,16 +32,16 @@ func parseTestIdl() *Idl {
 // not ready yet..
 func testIdl2Go(t *testing.T) {
 	idl := parseTestIdl()
-	
+
 	code := idl.GenerateGo("conform")
 	ioutil.WriteFile("conform.go", code, 0644)
 }
 
 func TestParseIdlJson(t *testing.T) {
 	idl := parseTestIdl()
-	
+
 	meta := Meta{BarristerVersion: "0.1.2", DateGenerated: 1337654725230000000, Checksum: "34f6238ed03c6319017382e0fdc638a7"}
-	
+
 	expected := Idl{Meta: meta}
 	expected.Elems = append(expected.Elems, IdlJsonElem{Type: "comment", Value: "Barrister conformance IDL\n\nThe bits in here have silly names and the operations\nare not intended to be useful.  The intent is to\nexercise as much of the IDL grammar as possible"})
 
@@ -49,14 +49,14 @@ func TestParseIdlJson(t *testing.T) {
 		EnumValue{Value: "ok"},
 		EnumValue{Value: "err"},
 	}
-	expected.Elems = append(expected.Elems, 
+	expected.Elems = append(expected.Elems,
 		IdlJsonElem{Type: "enum", Name: "Status", Values: enumVals})
 
 	enumVals2 := []EnumValue{
 		EnumValue{Value: "add"},
 		EnumValue{Value: "multiply", Comment: "mult comment"},
 	}
-	expected.Elems = append(expected.Elems, 
+	expected.Elems = append(expected.Elems,
 		IdlJsonElem{Type: "enum", Name: "MathOp", Values: enumVals2})
 
 	fields := []Field{
@@ -69,11 +69,11 @@ func TestParseIdlJson(t *testing.T) {
 		Field{Optional: false, IsArray: false, Type: "int", Name: "count"},
 		Field{Optional: false, IsArray: true, Type: "string", Name: "items"},
 	}
-	expected.Elems = append(expected.Elems, 
-		IdlJsonElem{Type: "struct", Name: "RepeatResponse", 
-		Extends: "Response", Fields: fields2, 
-	Comment: "testing struct inheritance"})
-	
+	expected.Elems = append(expected.Elems,
+		IdlJsonElem{Type: "struct", Name: "RepeatResponse",
+			Extends: "Response", Fields: fields2,
+			Comment: "testing struct inheritance"})
+
 	if !reflect.DeepEqual(expected.Meta, idl.Meta) {
 		t.Errorf("idl.Meta mismatch: %v != %v", expected.Meta, idl.Meta)
 	}
@@ -88,35 +88,38 @@ func TestParseIdlJson(t *testing.T) {
 		}
 	}
 
-	expectedIfaces := map[string]string { "A":"A", "B":"B"}
+	expectedIfaces := map[string]string{"A": "A", "B": "B"}
 	if !reflect.DeepEqual(idl.Interfaces, expectedIfaces) {
 		t.Errorf("idl.Interfaces: %v != %v", idl.Interfaces, expectedIfaces)
 	}
-	
-	methodKeys := []string { 
-		"A.add", "A.calc", "A.sqrt", "A.repeat", "A.say_hi", 
+
+	methodKeys := []string{
+		"A.add", "A.calc", "A.sqrt", "A.repeat", "A.say_hi",
 		"A.repeat_num", "A.putPerson", "B.echo",
 	}
-	for _, key := range(methodKeys) {
-		_, ok := idl.Methods[key]; if !ok {
+	for _, key := range methodKeys {
+		_, ok := idl.Methods[key]
+		if !ok {
 			t.Errorf("No method with key: %s", key)
 		}
 	}
 
-	structKeys := []string { 
+	structKeys := []string{
 		"Response", "RepeatResponse", "HiResponse", "RepeatRequest", "Person",
 	}
-	for _, key := range(structKeys) {
-		_, ok := idl.Structs[key]; if !ok {
+	for _, key := range structKeys {
+		_, ok := idl.Structs[key]
+		if !ok {
 			t.Errorf("No struct with key: %s", key)
 		}
 	}
 
-	enumKeys := []string { 
+	enumKeys := []string{
 		"Status", "MathOp",
 	}
-	for _, key := range(enumKeys) {
-		_, ok := idl.Enums[key]; if !ok {
+	for _, key := range enumKeys {
+		_, ok := idl.Enums[key]
+		if !ok {
 			t.Errorf("No enum with key: %s", key)
 		}
 	}
@@ -133,7 +136,7 @@ func TestParseIdlJson(t *testing.T) {
 
 ///////////////////////////////
 
-type BImpl struct { }
+type BImpl struct{}
 
 func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
 	if s == "return-null" {
@@ -148,9 +151,9 @@ type EchoCall struct {
 }
 
 type ValidateCase struct {
-	field    Field
-	val      interface{}
-	err      string
+	field Field
+	val   interface{}
+	err   string
 }
 
 func TestValidate(t *testing.T) {
@@ -169,20 +172,19 @@ func TestValidate(t *testing.T) {
 		ValidateCase{f2, "", "Type mismatch for 'age' - Expected: int Got: string"},
 		ValidateCase{f2, float64(10.3), "Type mismatch for 'age' - Expected: int Got: float64"},
 		ValidateCase{f2, nil, "Received null for required field: 'age'"},
-
 	}
 
-	for _, test := range(testCases) {
+	for _, test := range testCases {
 		err := idl.Validate(test.field, test.val, test.field.Name)
 		if err != nil && test.err != "" {
 			if *err != test.err {
 				t.Errorf("Field: %v  Val: %v - %s != %s", test.field, test.val, test.err, *err)
 			}
 		} else if err != nil {
-			t.Errorf("Field: %v  Val: %v - Validate returned %s, but expected nil", 
+			t.Errorf("Field: %v  Val: %v - Validate returned %s, but expected nil",
 				test.field, test.val, *err)
 		} else if test.err != "" {
-			t.Errorf("Field: %v  Val: %v - Validate returned nil, but expected: %s", 
+			t.Errorf("Field: %v  Val: %v - Validate returned nil, but expected: %s",
 				test.field, test.val, test.err)
 		}
 	}
@@ -192,11 +194,12 @@ func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
 	svr := NewServer(idl)
 
-	rpcReq := JsonRpcRequest{Id:"123", Method:"barrister-idl", Params:""}
+	rpcReq := JsonRpcRequest{Id: "123", Method: "barrister-idl", Params: ""}
 	reqJson, _ := json.Marshal(rpcReq)
 	respJson := svr.InvokeJSON(reqJson)
 	rpcResp := BarristerIdlRpcResponse{}
-	err := json.Unmarshal(respJson, &rpcResp); if err != nil {
+	err := json.Unmarshal(respJson, &rpcResp)
+	if err != nil {
 		panic(err)
 	}
 
@@ -219,13 +222,15 @@ func TestServerCallSuccess(t *testing.T) {
 		EchoCall{"return-null", nil},
 	}
 
-	for _, call := range(calls) {
-		res, err := svr.Call("B.echo", call.in); if err != nil {
+	for _, call := range calls {
+		res, err := svr.Call("B.echo", call.in)
+		if err != nil {
 			panic(err)
 		}
 
-		resStr, ok := res.(*string); if !ok {
-				s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v", 
+		resStr, ok := res.(*string)
+		if !ok {
+			s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v",
 				reflect.TypeOf(res).Name())
 			panic(s)
 		}
@@ -254,14 +259,14 @@ func TestServerCallFail(t *testing.T) {
 		CallFail{"B.echo", -32602},
 	}
 
-	for _, call := range(calls) {
+	for _, call := range calls {
 		res, err := svr.Call(call.method)
 		if res != nil {
 			t.Errorf("%v != nil on expected fail call: %s", res, call.method)
 		} else if err == nil {
 			t.Errorf("err == nil on expected fail call: %s", call.method)
 		} else if err.Code != call.errcode {
-			t.Errorf("errcode %d != %d on expected fail call: %s", err.Code, 
+			t.Errorf("errcode %d != %d on expected fail call: %s", err.Code,
 				call.errcode, call.method)
 		}
 	}
@@ -269,18 +274,18 @@ func TestServerCallFail(t *testing.T) {
 
 func TestParseMethod(t *testing.T) {
 	cases := [][]string{
-		[]string{ "B.echo", "B", "Echo"},
-		[]string{ "B.", "B.", ""},
-		[]string{ "Cat.a", "Cat", "A"},
-		[]string{ "barrister-idl", "barrister-idl", ""},
+		[]string{"B.echo", "B", "Echo"},
+		[]string{"B.", "B.", ""},
+		[]string{"Cat.a", "Cat", "A"},
+		[]string{"barrister-idl", "barrister-idl", ""},
 	}
 
-	for _, c := range(cases) {
+	for _, c := range cases {
 		iface, fname := ParseMethod(c[0])
-		if (iface != c[1]) {
+		if iface != c[1] {
 			t.Errorf("%s != %s for input: %s", iface, c[1], c[0])
 		}
-		if (fname != c[2]) {
+		if fname != c[2] {
 			t.Errorf("%s != %s for input: %s", fname, c[2], c[0])
 		}
 	}
@@ -289,7 +294,8 @@ func TestParseMethod(t *testing.T) {
 func TestParseStuff(t *testing.T) {
 	s := []byte(`{"jsonrpc":"2.0", "id":"123", "method": "blah", "params":["a","b"]}`)
 	target := map[string]interface{}{}
-	err := json.Unmarshal(s, &target); if err != nil {
+	err := json.Unmarshal(s, &target)
+	if err != nil {
 		panic(err)
 	}
 }
@@ -301,18 +307,18 @@ type ConvertTest struct {
 }
 
 type NoNesting struct {
-	A   string
-	B   int64
-	C   float64
-    D   bool
-	E   []string
+	A string
+	B int64
+	C float64
+	D bool
+	E []string
 }
 
 type StringAlias string
 
 type Nested struct {
-	Name  string
-	Nest  NoNesting
+	Name string
+	Nest NoNesting
 }
 
 func TestConvert(t *testing.T) {
@@ -321,21 +327,21 @@ func TestConvert(t *testing.T) {
 		ConvertTest{"hi", "hi", true},
 		ConvertTest{"", 10, false},
 		ConvertTest{StringAlias("blah"), "blah", true},
-		ConvertTest{NoNesting{A:"hi",B:30}, map[string]interface{}{ "A":"hi", "B":30}, true},
-		ConvertTest{NoNesting{}, map[string]interface{}{ "A":"hi", "B":"foo"}, false},
-		ConvertTest{NoNesting{C:3.2, D:true}, map[string]interface{}{ "C":3.2, "D":true}, true},
-		ConvertTest{NoNesting{C:2.8, D:false}, map[string]interface{}{ "C":2.8, "D":false}, true},
-		ConvertTest{NoNesting{E:[]string{"a","b"}}, map[string]interface{}{ "e":[]string{"a","b"}}, true},
-		ConvertTest{Nested{Name:"hi",Nest:NoNesting{B:30}}, map[string]interface{}{ "name":"hi", "Nest":map[string]interface{}{"B":30.0}}, true},
+		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"A": "hi", "B": 30}, true},
+		ConvertTest{NoNesting{}, map[string]interface{}{"A": "hi", "B": "foo"}, false},
+		ConvertTest{NoNesting{C: 3.2, D: true}, map[string]interface{}{"C": 3.2, "D": true}, true},
+		ConvertTest{NoNesting{C: 2.8, D: false}, map[string]interface{}{"C": 2.8, "D": false}, true},
+		ConvertTest{NoNesting{E: []string{"a", "b"}}, map[string]interface{}{"e": []string{"a", "b"}}, true},
+		ConvertTest{Nested{Name: "hi", Nest: NoNesting{B: 30}}, map[string]interface{}{"name": "hi", "Nest": map[string]interface{}{"B": 30.0}}, true},
 	}
 
-	for x, test := range(cases) {
+	for x, test := range cases {
 		msg := fmt.Sprintf("TestConvert[%d]", x)
 		targetType := reflect.TypeOf(test.target)
 		val, err := Convert(targetType, test.input, msg)
 		if test.ok {
 			if err != nil {
-				t.Errorf("%s - Couldn't convert %v to %v: %v", 
+				t.Errorf("%s - Couldn't convert %v to %v: %v",
 					msg, test.input, reflect.TypeOf(test.target).Name(), err)
 			} else {
 				if val.Kind() == reflect.Ptr {
@@ -348,7 +354,7 @@ func TestConvert(t *testing.T) {
 				}
 			}
 		} else if err == nil {
-			t.Errorf("%s - Expected err converting %v to %v, but it worked: %v", 
+			t.Errorf("%s - Expected err converting %v to %v, but it worked: %v",
 				msg, test.input, reflect.TypeOf(test.target).Name(), val)
 		}
 	}
@@ -366,15 +372,17 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 		EchoCall{"return-null", nil},
 	}
 
-	for _, call := range(calls) {
-		req := JsonRpcRequest{Id:"123", Method: "B.echo", Params: []interface{}{call.in} }
-		reqBytes, err := json.Marshal(req); if err != nil {
+	for _, call := range calls {
+		req := JsonRpcRequest{Id: "123", Method: "B.echo", Params: []interface{}{call.in}}
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
 			panic(err)
 		}
 
 		resBytes := svr.InvokeJSON(reqBytes)
 		resp := JsonRpcResponse{}
-		err = json.Unmarshal(resBytes, &resp); if err != nil {
+		err = json.Unmarshal(resBytes, &resp)
+		if err != nil {
 			panic(err)
 		}
 

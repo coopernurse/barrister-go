@@ -5,28 +5,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
-	"reflect"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"io/ioutil"
+	"reflect"
+	"strings"
 	"time"
 )
 
 var zeroVal reflect.Value
 
 type TypeError struct {
-    // string that describes location of value in the
-    // param or return value graph.  e.g. param[0].Addresses[0].Street1
-    path  string
+	// string that describes location of value in the
+	// param or return value graph.  e.g. param[0].Addresses[0].Street1
+	path string
 
-    msg   string
+	msg string
 }
 
 func (e *TypeError) Error() string {
 	return fmt.Sprintf("Type error: %s: %s", e.path, e.msg)
 }
-
 
 func EncodeASCII(b []byte) (string, error) {
 	in := bytes.NewBuffer(b)
@@ -64,11 +63,11 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 	}
 
 	idl := &Idl{
-		Elems: elems, 
+		Elems:      elems,
 		Interfaces: map[string]string{},
-		Methods: map[string]Function{}, 
-		Structs: map[string]Struct{},
-		Enums: map[string][]EnumValue{},
+		Methods:    map[string]Function{},
+		Structs:    map[string]Struct{},
+		Enums:      map[string][]EnumValue{},
 	}
 
 	for _, el := range elems {
@@ -76,7 +75,7 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 			idl.Meta = Meta{el.BarristerVersion, el.DateGenerated * 1000000, el.Checksum}
 		} else if el.Type == "interface" {
 			idl.Interfaces[el.Name] = el.Name
-			for _, f := range(el.Functions) {
+			for _, f := range el.Functions {
 				meth := fmt.Sprintf("%s.%s", el.Name, f.Name)
 				idl.Methods[meth] = f
 			}
@@ -116,10 +115,10 @@ type IdlJsonElem struct {
 }
 
 type Function struct {
-	Name     string   `json:"name"`
-	Comment  string   `json:"comment"`
-	Params   []Field  `json:"params"`
-	Returns  Field    `json:"returns"`
+	Name    string  `json:"name"`
+	Comment string  `json:"comment"`
+	Params  []Field `json:"params"`
+	Returns Field   `json:"returns"`
 }
 
 type Struct struct {
@@ -149,8 +148,8 @@ type Meta struct {
 
 type Idl struct {
 	// raw data from IDL file
-	Elems   []IdlJsonElem
-	Meta    Meta
+	Elems []IdlJsonElem
+	Meta  Meta
 
 	// hashed elements
 	Interfaces map[string]string
@@ -167,14 +166,14 @@ func (idl *Idl) ValidateParams(method string, params ...interface{}) *JsonRpcErr
 	}
 
 	if len(meth.Params) != len(params) {
-		msg := fmt.Sprintf("Incorrect param count for method: %s - expected %d but got %d", 
+		msg := fmt.Sprintf("Incorrect param count for method: %s - expected %d but got %d",
 			method, len(meth.Params), len(params))
 		return &JsonRpcError{Code: -32602, Message: msg}
 	}
 
 	//fmt.Printf("ValidateParams: %v\n", params)
 
-	for x, field := range(meth.Params) {
+	for x, field := range meth.Params {
 		path := fmt.Sprintf("param[%d]", x)
 		err := idl.Validate(field, params[x], path)
 		if err != nil {
@@ -221,12 +220,13 @@ func (idl *Idl) Validate(expected Field, actual interface{}, path string) *strin
 	}
 
 	if expected.Type == "string" {
-		_, ok := actual.(string); if !ok {
+		_, ok := actual.(string)
+		if !ok {
 			return typeErr(expected, actual, path)
 		}
 	} else if expected.Type == "int" {
 		t := reflect.TypeOf(actual).Name()
-		if t == "int" || t == "int64" ||  t == "int8" || t == "int16" || t == "int32" {
+		if t == "int" || t == "int64" || t == "int8" || t == "int16" || t == "int32" {
 			return nil
 		}
 		return typeErr(expected, actual, path)
@@ -259,31 +259,31 @@ func (idl *Idl) GenerateGo(pkgName string) []byte {
 
 type JsonRpcRequest struct {
 	Jsonrpc string      `json:"jsonrpc"`
-    Id     string       `json:"id"`
-    Method string       `json:"method"`
-    Params interface{}  `json:"params"`
+	Id      string      `json:"id"`
+	Method  string      `json:"method"`
+	Params  interface{} `json:"params"`
 }
 
 type JsonRpcError struct {
-	Code      int          `json:"code"`
-	Message   string       `json:"message"`
-	Data      interface{}  `json:"data,omitempty"`
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
-func (e *JsonRpcError) Error() string { 
-	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message);
+func (e *JsonRpcError) Error() string {
+	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message)
 }
 
 type JsonRpcResponse struct {
-    Id      string        `json:"id"`
-    Error   *JsonRpcError `json:"error,omitempty"`
-    Result  interface{}  `json:"result,omitempty"`
+	Id     string        `json:"id"`
+	Error  *JsonRpcError `json:"error,omitempty"`
+	Result interface{}   `json:"result,omitempty"`
 }
 
 type BarristerIdlRpcResponse struct {
-    Id      string        `json:"id"`
-    Error   *JsonRpcError `json:"error,omitempty"`
-    Result  []IdlJsonElem `json:"result,omitempty"`
+	Id     string        `json:"id"`
+	Error  *JsonRpcError `json:"error,omitempty"`
+	Result []IdlJsonElem `json:"result,omitempty"`
 }
 
 //////////////////////////////////////////////////
@@ -296,9 +296,9 @@ func randStr(length int) string {
 	for i := 0; i < length; i++ {
 		x := rand.Int31n(36)
 		if x < 10 {
-			b.WriteString(string(48+x))
+			b.WriteString(string(48 + x))
 		} else {
-			b.WriteString(string(87+x))
+			b.WriteString(string(87 + x))
 		}
 	}
 	return b.String()
@@ -309,17 +309,17 @@ type Transport interface {
 }
 
 type HttpTransport struct {
-	Url    string
+	Url string
 }
 
 func (t *HttpTransport) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
-	jsonReq := JsonRpcRequest{ Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params }
+	jsonReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
 	post, err := json.Marshal(jsonReq)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("req body:\n%s\n", post)
+	//fmt.Printf("req body:\n%s\n", post)
 
 	req, err := http.NewRequest("POST", "http://localhost:9233", bytes.NewBuffer(post))
 	if err != nil {
@@ -341,7 +341,7 @@ func (t *HttpTransport) Call(method string, params ...interface{}) (interface{},
 
 	jsonResp := JsonRpcResponse{}
 
-	fmt.Printf("resp body:\n%s\n", body)
+	//fmt.Printf("resp body:\n%s\n", body)
 
 	err = json.Unmarshal(body, &jsonResp)
 	if err != nil {
@@ -360,12 +360,12 @@ func (t *HttpTransport) Call(method string, params ...interface{}) (interface{},
 ////////////
 
 func NewServer(idl *Idl) Server {
-	return Server{idl, map[string]interface{}{} }
+	return Server{idl, map[string]interface{}{}}
 }
 
 type Server struct {
-	idl         *Idl
-	handlers    map[string]interface{}
+	idl      *Idl
+	handlers map[string]interface{}
 }
 
 func (s *Server) AddHandler(iface string, impl interface{}) {
@@ -394,12 +394,13 @@ func (s *Server) InvokeJSON(j []byte) []byte {
 			return jsonParseErr("", err)
 		}
 
-		for _, req := range(batchReq) {
+		for _, req := range batchReq {
 			resp := s.InvokeOne(&req)
 			batchResp = append(batchResp, *resp)
 		}
 
-		b, _ := json.Marshal(batchResp); if err != nil {
+		b, _ := json.Marshal(batchResp)
+		if err != nil {
 			panic(err)
 		}
 		return b
@@ -414,7 +415,8 @@ func (s *Server) InvokeJSON(j []byte) []byte {
 
 	resp := s.InvokeOne(&rpcReq)
 
-	b, _ := json.Marshal(resp); if err != nil {
+	b, _ := json.Marshal(resp)
+	if err != nil {
 		panic(err)
 	}
 	return b
@@ -447,12 +449,12 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 	return &JsonRpcResponse{Id: rpcReq.Id, Error: rpcerr}
 }
 
-
 func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
 	iface, fname := ParseMethod(method)
 
-	handler, ok := s.handlers[iface]; if !ok {
-		return nil, &JsonRpcError{Code:-32601, Message:fmt.Sprintf("No handler registered for interface: %s", iface)}
+	handler, ok := s.handlers[iface]
+	if !ok {
+		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("No handler registered for interface: %s", iface)}
 	}
 
 	err := s.idl.ValidateParams(method, params...)
@@ -463,13 +465,13 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
 	if fn == zeroVal {
-		return nil, &JsonRpcError{Code:-32601, Message:fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
+		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
 	}
 
 	// check params
 	fnType := fn.Type()
 	if fnType.NumIn() != len(params) {
-		return nil, &JsonRpcError{Code:-32602, Message:fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}
+		return nil, &JsonRpcError{Code: -32602, Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}
 	}
 
 	// convert params
@@ -479,30 +481,31 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		path := fmt.Sprintf("param[%d]", x)
 		converted, err := Convert(desiredType, param, path)
 		if err != nil {
-			return nil, &JsonRpcError{Code:-32602, Message: err.Error()}
+			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
 		}
 		paramVals = append(paramVals, converted)
-		fmt.Printf("%s - %v\n", path, reflect.TypeOf(converted.Interface()))
+		//fmt.Printf("%s - %v\n", path, reflect.TypeOf(converted.Interface()))
 	}
 
 	// make the call
 	ret := fn.Call(paramVals)
 	if len(ret) != 2 {
-		return nil, &JsonRpcError{Code:-32603, Message:fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))}
+		return nil, &JsonRpcError{Code: -32603, Message: fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))}
 	}
 
 	ret0 := ret[0].Interface()
 	ret1 := ret[1].Interface()
 
 	if ret1 != nil {
-		rpcErr, ok := ret1.(*JsonRpcError); if !ok {
-			return nil, &JsonRpcError{Code:-32603, Message:fmt.Sprintf("Method %s did not return JsonRpcError for last return val: %v", method, ret1)}
+		rpcErr, ok := ret1.(*JsonRpcError)
+		if !ok {
+			return nil, &JsonRpcError{Code: -32603, Message: fmt.Sprintf("Method %s did not return JsonRpcError for last return val: %v", method, ret1)}
 		}
 		return ret0, rpcErr
 	}
 
 	err = s.idl.ValidateResult(method, ret0)
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
 
@@ -523,7 +526,7 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 	actType := reflect.TypeOf(actual)
 
 	goal := fmt.Sprintf("convert: %v - %v to %v", path, actType.Kind().String(), desired)
-	fmt.Printf("%s\n", goal)
+	//fmt.Printf("%s\n", goal)
 
 	if actType == desired {
 		return reflect.ValueOf(actual), nil
@@ -617,7 +620,7 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 	return zeroVal, &TypeError{path, "Unable to " + goal}
 }
 
-func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (reflect.Value, error) { 
+func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (reflect.Value, error) {
 	sliceType := desired.Elem()
 	sliceV := reflect.New(desired)
 	slice := sliceV.Elem()
@@ -633,8 +636,8 @@ func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (refl
 	return slice, nil
 }
 
-func convertStruct(desired reflect.Type, m map[string]interface{}, 
-	desirePtr bool, path string) (reflect.Value, error) { 
+func convertStruct(desired reflect.Type, m map[string]interface{},
+	desirePtr bool, path string) (reflect.Value, error) {
 
 	val := reflect.New(desired)
 	num := desired.NumField()
@@ -673,10 +676,10 @@ func ParseMethod(method string) (string, string) {
 	i := strings.Index(method, ".")
 	if i > -1 && i < (len(method)-1) {
 		iface := method[0:i]
-		if i < (len(method)-2) {
+		if i < (len(method) - 2) {
 			return iface, strings.ToUpper(method[i+1:i+2]) + method[i+2:]
 		} else {
-			return iface, strings.ToUpper(method[i+1:]);
+			return iface, strings.ToUpper(method[i+1:])
 		}
 	}
 	return method, ""
@@ -689,7 +692,7 @@ func capitalize(s string) string {
 	case 1:
 		return strings.ToUpper(s)
 	}
-	return strings.ToUpper(s[0:1])+s[1:]
+	return strings.ToUpper(s[0:1]) + s[1:]
 }
 
 func uncapitalize(s string) string {
@@ -699,11 +702,11 @@ func uncapitalize(s string) string {
 	case 1:
 		return strings.ToLower(s)
 	}
-	return strings.ToLower(s[0:1])+s[1:]
+	return strings.ToLower(s[0:1]) + s[1:]
 }
 
 func jsonParseErr(reqId string, err error) []byte {
-	rpcerr := &JsonRpcError{Code:-32700, Message:fmt.Sprintf("Unable to parse JSON: %s", err.Error())}
+	rpcerr := &JsonRpcError{Code: -32700, Message: fmt.Sprintf("Unable to parse JSON: %s", err.Error())}
 	resp := JsonRpcResponse{}
 	resp.Id = reqId
 	resp.Error = rpcerr
