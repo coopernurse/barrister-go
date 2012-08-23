@@ -153,16 +153,16 @@ type Idl struct {
 }
 
 func (idl *Idl) ComputeAllStructFields() {
-	for _, s := range(idl.Structs) {
+	for _, s := range idl.Structs {
 		s.computed = idl.ComputeStructFields(s, map[string]Field{})
 	}
 }
 
 func (idl *Idl) ComputeStructFields(toAdd *Struct, computed map[string]Field) map[string]Field {
-	for _, f := range(toAdd.Fields) {
+	for _, f := range toAdd.Fields {
 		computed[f.Name] = f
 	}
-	
+
 	if toAdd.Extends != "" {
 		parent, ok := idl.Structs[toAdd.Extends]
 		if ok {
@@ -213,10 +213,10 @@ func (e *JsonRpcError) Error() string {
 }
 
 type JsonRpcResponse struct {
-	Jsonrpc string       `json:"jsonrpc"`
-	Id     string        `json:"id"`
-	Error  *JsonRpcError `json:"error,omitempty"`
-	Result interface{}   `json:"result,omitempty"`
+	Jsonrpc string        `json:"jsonrpc"`
+	Id      string        `json:"id"`
+	Error   *JsonRpcError `json:"error,omitempty"`
+	Result  interface{}   `json:"result,omitempty"`
 }
 
 type BarristerIdlRpcResponse struct {

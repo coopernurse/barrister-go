@@ -326,25 +326,25 @@ type Nested struct {
 
 func TestConvert(t *testing.T) {
 
-	strField := &Field{Type:"string", Optional: false, IsArray: false}
-	enumField := &Field{Type:"StringAlias", Optional: false, IsArray: false}
+	strField := &Field{Type: "string", Optional: false, IsArray: false}
+	enumField := &Field{Type: "StringAlias", Optional: false, IsArray: false}
 
-	noNestStruct := &Struct{Name:"NoNesting", Fields: []Field{
-			Field{Name:"a", Type:"string", Optional: true, IsArray: false},
-			Field{Name:"b", Type:"int", Optional: true, IsArray: false},
-			Field{Name:"C", Type:"float", Optional: true, IsArray: false},
-			Field{Name:"d", Type:"bool", Optional: true, IsArray: false},
-			Field{Name:"E", Type:"string", Optional: true, IsArray: true},
+	noNestStruct := &Struct{Name: "NoNesting", Fields: []Field{
+		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
+		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
+		Field{Name: "C", Type: "float", Optional: true, IsArray: false},
+		Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
+		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
 	}}
-	noNestField := &Field{Type:"NoNesting", Optional: false, IsArray: true}
-	
-	nestStruct := &Struct{Name:"Nested", Fields: []Field{
-			Field{Name:"name", Type:"string", Optional: false, IsArray: false},
-			Field{Name:"Nest", Type:"NoNesting", Optional: false, IsArray: false},
-	}}
-	nestField := &Field{Type:"Nested", Optional: false, IsArray: true}
+	noNestField := &Field{Type: "NoNesting", Optional: false, IsArray: true}
 
-	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{} }
+	nestStruct := &Struct{Name: "Nested", Fields: []Field{
+		Field{Name: "name", Type: "string", Optional: false, IsArray: false},
+		Field{Name: "Nest", Type: "NoNesting", Optional: false, IsArray: false},
+	}}
+	nestField := &Field{Type: "Nested", Optional: false, IsArray: true}
+
+	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
 	idl.Structs["NoNesting"] = noNestStruct
 	idl.Structs["Nested"] = nestStruct
 	idl.Enums["StringAlias"] = []EnumValue{
