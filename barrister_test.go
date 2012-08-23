@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	. "github.com/coopernurse/barrister-go"
+	. "github.com/sdegutis/go.assert"
 	"io/ioutil"
 	"reflect"
 	"testing"
@@ -74,24 +75,15 @@ func TestParseIdlJson(t *testing.T) {
 			Extends: "Response", Fields: fields2,
 			Comment: "testing struct inheritance"})
 
-	if !reflect.DeepEqual(expected.Meta, idl.Meta) {
-		t.Errorf("idl.Meta mismatch: %v != %v", expected.Meta, idl.Meta)
-	}
-
-	if len(idl.Elems) != 11 {
-		t.Errorf("idl.Elems len %d != 11", len(idl.Elems))
-	}
+	DeepEquals(t, expected.Meta, idl.Meta)
+	Equals(t, len(idl.Elems), 11)
 
 	for i, ex := range expected.Elems {
-		if !reflect.DeepEqual(ex, idl.Elems[i]) {
-			t.Errorf("idl.Elems[%d] mismatch: %v != %v", i, ex, idl.Elems[i])
-		}
+		DeepEquals(t, ex, idl.Elems[i])
 	}
 
 	expectedIfaces := map[string]string{"A": "A", "B": "B"}
-	if !reflect.DeepEqual(idl.Interfaces, expectedIfaces) {
-		t.Errorf("idl.Interfaces: %v != %v", idl.Interfaces, expectedIfaces)
-	}
+	DeepEquals(t, idl.Interfaces, expectedIfaces)
 
 	methodKeys := []string{
 		"A.add", "A.calc", "A.sqrt", "A.repeat", "A.say_hi",
@@ -207,9 +199,7 @@ func TestServerBarristerIdl(t *testing.T) {
 
 	//fmt.Printf("%v\n", rpcResp.Result)
 
-	if !reflect.DeepEqual(idl.Elems, rpcResp.Result) {
-		t.Errorf("idl: %v != %v", idl.Elems, rpcResp.Result)
-	}
+	DeepEquals(t, idl.Elems, rpcResp.Result)
 }
 
 func TestServerCallSuccess(t *testing.T) {
@@ -284,12 +274,8 @@ func TestParseMethod(t *testing.T) {
 
 	for _, c := range cases {
 		iface, fname := ParseMethod(c[0])
-		if iface != c[1] {
-			t.Errorf("%s != %s for input: %s", iface, c[1], c[0])
-		}
-		if fname != c[2] {
-			t.Errorf("%s != %s for input: %s", fname, c[2], c[0])
-		}
+		Equals(t, iface, c[1])
+		Equals(t, fname, c[2])
 	}
 }
 
@@ -380,6 +366,7 @@ func TestConvert(t *testing.T) {
 				if val.Kind() == reflect.Ptr {
 					val = val.Elem()
 				}
+
 				if val.Type() != targetType {
 					t.Errorf("%s - Return type: %v != %v", msg, val.Type(), targetType)
 				} else if !reflect.DeepEqual(val.Interface(), test.target) {
