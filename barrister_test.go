@@ -359,18 +359,19 @@ func TestConvert(t *testing.T) {
 		ConvertTest{"", 10, strField, false},
 		ConvertTest{StringAlias("blah"), "blah", enumField, true},
 		ConvertTest{StringAlias("invalid"), "invalid", enumField, false},
-		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"A": "hi", "B": 30}, noNestField, true},
-		ConvertTest{NoNesting{}, map[string]interface{}{"A": "hi", "B": "foo"}, noNestField, false},
-		ConvertTest{NoNesting{C: 3.2, D: true}, map[string]interface{}{"C": 3.2, "D": true}, noNestField, true},
+		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},
+		ConvertTest{NoNesting{}, map[string]interface{}{"a": "hi", "b": "foo"}, noNestField, false},
+		ConvertTest{NoNesting{C: 3.2, D: true}, map[string]interface{}{"C": 3.2, "d": true}, noNestField, true},
 		ConvertTest{NoNesting{C: 2.8, D: false}, map[string]interface{}{"C": 2.8, "D": false}, noNestField, true},
-		ConvertTest{NoNesting{E: []string{"a", "b"}}, map[string]interface{}{"e": []string{"a", "b"}}, noNestField, true},
-		ConvertTest{Nested{Name: "hi", Nest: NoNesting{B: 30}}, map[string]interface{}{"name": "hi", "Nest": map[string]interface{}{"B": 30.0}}, nestField, true},
+		ConvertTest{NoNesting{E: []string{"a", "b"}}, map[string]interface{}{"E": []string{"a", "b"}}, noNestField, true},
+		ConvertTest{Nested{Name: "hi", Nest: NoNesting{B: 30}}, map[string]interface{}{"name": "hi", "Nest": map[string]interface{}{"b": 30.0}}, nestField, true},
 	}
 
 	for x, test := range cases {
 		msg := fmt.Sprintf("TestConvert[%d]", x)
 		targetType := reflect.TypeOf(test.target)
-		val, err := Convert(idl, test.field, targetType, test.input, msg)
+		conv := NewConvert(idl, test.field, targetType, test.input, msg)
+		val, err := conv.Run()
 		if test.ok {
 			if err != nil {
 				t.Errorf("%s - Couldn't convert %v to %v: %v",
@@ -382,12 +383,12 @@ func TestConvert(t *testing.T) {
 				if val.Type() != targetType {
 					t.Errorf("%s - Return type: %v != %v", msg, val.Type(), targetType)
 				} else if !reflect.DeepEqual(val.Interface(), test.target) {
-					t.Errorf("%s - Expected %v but was %v", msg, test.input, val.Interface())
+					t.Errorf("%s - Expected %v but was %v", msg, test.target, val.Interface())
 				}
 			}
 		} else if err == nil {
 			t.Errorf("%s - Expected err converting %v to %v, but it worked: %v",
-				msg, test.input, reflect.TypeOf(test.target).Name(), val)
+				msg, test.input, reflect.TypeOf(test.target).Name(), val.Interface())
 		}
 	}
 }
