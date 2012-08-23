@@ -66,7 +66,7 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 		Elems:      elems,
 		Interfaces: map[string]string{},
 		Methods:    map[string]Function{},
-		Structs:    map[string]Struct{},
+		Structs:    map[string]*Struct{},
 		Enums:      map[string][]EnumValue{},
 	}
 
@@ -80,11 +80,13 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 				idl.Methods[meth] = f
 			}
 		} else if el.Type == "struct" {
-			idl.Structs[el.Name] = Struct{Name: el.Name, Extends: el.Extends, Fields: el.Fields}
+			idl.Structs[el.Name] = &Struct{Name: el.Name, Extends: el.Extends, Fields: el.Fields}
 		} else if el.Type == "enum" {
 			idl.Enums[el.Name] = el.Values
 		}
 	}
+
+	idl.ComputeAllStructFields()
 
 	return idl, nil
 }
@@ -125,6 +127,10 @@ type Struct struct {
 	Name    string
 	Extends string
 	Fields  []Field
+
+	// fields in this struct, and its parents
+	// hashed by Field.Name
+	computed map[string]Field
 }
 
 type Field struct {
@@ -154,85 +160,29 @@ type Idl struct {
 	// hashed elements
 	Interfaces map[string]string
 	Methods    map[string]Function
-	Structs    map[string]Struct
+	Structs    map[string]*Struct
 	Enums      map[string][]EnumValue
 }
 
-func (idl *Idl) ValidateParams(method string, params ...interface{}) *JsonRpcError {
-	meth, ok := idl.Methods[method]
-	if !ok {
-		msg := fmt.Sprintf("Method not found: %s", method)
-		return &JsonRpcError{Code: -32601, Message: msg}
+func (idl *Idl) ComputeAllStructFields() {
+	for _, s := range(idl.Structs) {
+		s.computed = idl.ComputeStructFields(s, map[string]Field{})
 	}
+}
 
-	if len(meth.Params) != len(params) {
-		msg := fmt.Sprintf("Incorrect param count for method: %s - expected %d but got %d",
-			method, len(meth.Params), len(params))
-		return &JsonRpcError{Code: -32602, Message: msg}
+func (idl *Idl) ComputeStructFields(toAdd *Struct, computed map[string]Field) map[string]Field {
+	for _, f := range(toAdd.Fields) {
+		computed[f.Name] = f
 	}
-
-	//fmt.Printf("ValidateParams: %v\n", params)
-
-	for x, field := range meth.Params {
-		path := fmt.Sprintf("param[%d]", x)
-		err := idl.Validate(field, params[x], path)
-		if err != nil {
-			return &JsonRpcError{Code: -32602, Message: *err}
+	
+	if toAdd.Extends != "" {
+		parent, ok := idl.Structs[toAdd.Extends]
+		if ok {
+			computed = idl.ComputeStructFields(parent, computed)
 		}
 	}
 
-	return nil
-}
-
-func (idl *Idl) ValidateResult(method string, result interface{}) *JsonRpcError {
-	meth, ok := idl.Methods[method]
-	if !ok {
-		msg := fmt.Sprintf("Method not found: %s", method)
-		return &JsonRpcError{Code: -32601, Message: msg}
-	}
-
-	err := idl.Validate(meth.Returns, result, "")
-	if err != nil {
-		msg := fmt.Sprintf("Method %s returned invalid result: %s", method, *err)
-		return &JsonRpcError{Code: -32001, Message: msg}
-	}
-	return nil
-}
-
-func typeErr(expected Field, actual interface{}, path string) *string {
-	msg := fmt.Sprintf("Type mismatch for '%s' - Expected: %s Got: %v", path, expected.Type, reflect.TypeOf(actual).Name())
-	return &msg
-}
-
-func nullErr(path string) *string {
-	msg := fmt.Sprintf("Received null for required field: '%s'", path)
-	return &msg
-}
-
-func (idl *Idl) Validate(expected Field, actual interface{}, path string) *string {
-	//fmt.Printf("Validate:  field=%v    actual=%v\n", expected, actual)
-
-	if actual == nil {
-		if expected.Optional {
-			return nil
-		}
-		return nullErr(path)
-	}
-
-	if expected.Type == "string" {
-		_, ok := actual.(string)
-		if !ok {
-			return typeErr(expected, actual, path)
-		}
-	} else if expected.Type == "int" {
-		t := reflect.TypeOf(actual).Name()
-		if t == "int" || t == "int64" || t == "int8" || t == "int16" || t == "int32" {
-			return nil
-		}
-		return typeErr(expected, actual, path)
-	}
-
-	return nil
+	return computed
 }
 
 func (idl *Idl) GenerateGo(pkgName string) []byte {
@@ -455,17 +405,18 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 }
 
 func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+
+	idlFunc, ok := s.idl.Methods[method]
+	if !ok {
+		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}
+	}
+
 	iface, fname := ParseMethod(method)
 
 	handler, ok := s.handlers[iface]
 	if !ok {
 		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("No handler registered for interface: %s", iface)}
 	}
-
-	//err := s.idl.ValidateParams(method, params...)
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
@@ -479,12 +430,17 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return nil, &JsonRpcError{Code: -32602, Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}
 	}
 
+	if len(idlFunc.Params) != len(params) {
+		return nil, &JsonRpcError{Code: -32602, Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, len(idlFunc.Params), len(params))}
+	}
+
 	// convert params
 	paramVals := []reflect.Value{}
 	for x, param := range params {
 		desiredType := fnType.In(x)
+		idlField := idlFunc.Params[x]
 		path := fmt.Sprintf("param[%d]", x)
-		converted, err := Convert(desiredType, param, path)
+		converted, err := Convert(s.idl, &idlField, desiredType, param, path)
 		if err != nil {
 			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
 		}
@@ -517,12 +473,16 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 	return ret0, nil
 }
 
-func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Value, error) {
+func Convert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) (reflect.Value, error) {
 	kind := desired.Kind()
 
 	if actual == nil {
 		if kind == reflect.Ptr {
-			return reflect.ValueOf(nil), nil
+			if field.Optional {
+				return reflect.ValueOf(nil), nil
+			} else {
+				return zeroVal, &TypeError{path, "null not allowed"}
+			}
 		} else {
 			return zeroVal, &TypeError{path, "Unable to convert nil to non-pointer"}
 		}
@@ -552,7 +512,22 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 			s, ok := actual.(string)
 			if ok {
 				v.SetString(s)
-				return returnVal(v, desirePtr)
+
+				if field.Type != "string" {
+					enum, ok := idl.Enums[field.Type]
+					if ok {
+						for _, enumVal := range(enum) {
+							if enumVal.Value == s {
+								return checkPointer(v, desirePtr)
+							}
+						}
+						
+						msg := fmt.Sprintf("Value %s not in enum values: %v", s, enum)
+						return zeroVal, &TypeError{path:path, msg:msg}
+					}
+				}
+
+				return returnVal(v, desirePtr, field, "string", path)
 			}
 		}
 	} else {
@@ -563,76 +538,79 @@ func Convert(desired reflect.Type, actual interface{}, path string) (reflect.Val
 	case reflect.String:
 		s, ok := actual.(string)
 		if ok {
-			return returnVal(reflect.ValueOf(string(s)), desirePtr)
+			return returnVal(reflect.ValueOf(string(s)), desirePtr, field, "string", path)
 		}
 	case reflect.Int:
 		s, ok := actual.(int)
 		if ok {
-			return returnVal(reflect.ValueOf(s), desirePtr)
+			return returnVal(reflect.ValueOf(s), desirePtr, field, "int", path)
 		}
 		s2, ok := actual.(int64)
 		if ok {
-			return returnVal(reflect.ValueOf(int(s2)), desirePtr)
+			return returnVal(reflect.ValueOf(int(s2)), desirePtr, field, "int", path)
 		}
 	case reflect.Int64:
 		s, ok := actual.(int64)
 		if ok {
-			return returnVal(reflect.ValueOf(s), desirePtr)
+			return returnVal(reflect.ValueOf(s), desirePtr, field, "int", path)
 		}
 		s2, ok := actual.(int)
 		if ok {
-			return returnVal(reflect.ValueOf(int64(s2)), desirePtr)
+			return returnVal(reflect.ValueOf(int64(s2)), desirePtr, field, "int", path)
 		}
 		s3, ok := actual.(float64)
 		if ok {
 			s4 := int64(s3)
 			if float64(s4) == s3 {
-				return returnVal(reflect.ValueOf(s4), desirePtr)
+				return returnVal(reflect.ValueOf(s4), desirePtr, field, "int", path)
 			}
 		}
 	case reflect.Float32:
 		s, ok := actual.(float32)
 		if ok {
-			return returnVal(reflect.ValueOf(s), desirePtr)
+			return returnVal(reflect.ValueOf(s), desirePtr, field, "float", path)
 		}
 	case reflect.Float64:
 		s, ok := actual.(float64)
 		if ok {
-			return returnVal(reflect.ValueOf(s), desirePtr)
+			return returnVal(reflect.ValueOf(s), desirePtr, field, "float", path)
 		}
 		s2, ok := actual.(float32)
 		if ok {
-			return returnVal(reflect.ValueOf(float64(s2)), desirePtr)
+			return returnVal(reflect.ValueOf(float64(s2)), desirePtr, field, "float", path)
 		}
 	case reflect.Bool:
 		b, ok := actual.(bool)
 		if ok {
-			return returnVal(reflect.ValueOf(b), desirePtr)
+			return returnVal(reflect.ValueOf(b), desirePtr, field, "bool", path)
 		}
 	case reflect.Slice:
 		actVal := reflect.ValueOf(actual)
 		actType := actVal.Type()
 		if actType.Kind() == reflect.Slice {
-			return convertSlice(desired, actVal, path)
+			return convertSlice(idl, field, desired, actVal, path)
 		}
 	case reflect.Struct:
 		m, ok := actual.(map[string]interface{})
 		if ok {
-			return convertStruct(desired, m, desirePtr, path)
+			return convertStruct(idl, field, desired, m, desirePtr, path)
 		}
 	}
 
 	return zeroVal, &TypeError{path, "Unable to " + goal}
 }
 
-func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (reflect.Value, error) {
+func convertSlice(idl *Idl, field *Field, desired reflect.Type, actVal reflect.Value, path string) (reflect.Value, error) {
 	sliceType := desired.Elem()
 	sliceV := reflect.New(desired)
 	slice := sliceV.Elem()
+
+	elemField := &Field{Name: field.Name, Type: field.Type, Optional: field.Optional, IsArray: false}
+
 	for x := 0; x < actVal.Len(); x++ {
 		el := actVal.Index(x)
 		pathCh := fmt.Sprintf("%s[%d]", path, x)
-		conv, err := Convert(sliceType, el.Interface(), pathCh)
+		conv, err := Convert(idl, elemField, sliceType, el.Interface(), pathCh)
 		if err != nil {
 			return zeroVal, err
 		}
@@ -641,24 +619,47 @@ func convertSlice(desired reflect.Type, actVal reflect.Value, path string) (refl
 	return slice, nil
 }
 
-func convertStruct(desired reflect.Type, m map[string]interface{},
+func convertStruct(idl *Idl, field *Field, desired reflect.Type, m map[string]interface{},
 	desirePtr bool, path string) (reflect.Value, error) {
 
+	idlStruct, ok := idl.Structs[field.Type]
+
+	fmt.Printf("convertStruct: %s   s.computed=%v\n", field.Type, idlStruct.computed)
+
+	if !ok {
+		msg := fmt.Sprintf("Struct not found in IDL: %s", field.Type)
+		return zeroVal, &TypeError{path:path, msg:msg}
+	}
+
 	val := reflect.New(desired)
-	num := desired.NumField()
-	for i := 0; i < num; i++ {
-		fieldType := desired.Field(i)
-		key := fieldType.Name
-		mval, ok := m[key]
+
+	for fname, sField := range(idlStruct.computed) {
+		goName := fname
+		fieldType, ok := desired.FieldByName(fname)
 		if !ok {
-			mval, ok = m[uncapitalize(key)]
+			goName := capitalize(fname)
+			fieldType, ok = desired.FieldByName(goName)
+			if !ok {
+				msg := fmt.Sprintf("Struct: %v is missing required field: %s", desired, fname)
+				return zeroVal, &TypeError{path:path, msg:msg}
+			}
 		}
+
+		mval, ok := m[fname]
+
+		fmt.Printf("convertStruct: %s fname=%s mval=%v\n", field.Type, fname, mval)
+
+		if !ok && !sField.Optional {
+			msg := fmt.Sprintf("Struct value: %s is missing required field: %s", field.Type, fname)
+			return zeroVal, &TypeError{path:path, msg:msg}
+		}
+
 		if ok {
-			conv, err := Convert(fieldType.Type, mval, path+"."+key)
+			conv, err := Convert(idl, &sField, fieldType.Type, mval, path+"."+fname)
 			if err != nil {
 				return zeroVal, err
 			}
-			f := val.Elem().Field(i)
+			f := val.Elem().FieldByName(goName)
 			if f.Kind() == reflect.Ptr {
 				if conv.Kind() == reflect.Ptr {
 					f.Set(conv)
@@ -674,7 +675,7 @@ func convertStruct(desired reflect.Type, m map[string]interface{},
 			}
 		}
 	}
-	return returnVal(val.Elem(), desirePtr)
+	return checkPointer(val.Elem(), desirePtr)
 }
 
 func ParseMethod(method string) (string, string) {
@@ -719,7 +720,26 @@ func jsonParseErr(reqId string, err error) []byte {
 	return b
 }
 
-func returnVal(val reflect.Value, desirePtr bool) (reflect.Value, error) {
+func typeErr(expected Field, actual interface{}, path string) *string {
+	msg := fmt.Sprintf("Type mismatch for '%s' - Expected: %s Got: %v", path, expected.Type, reflect.TypeOf(actual).Name())
+	return &msg
+}
+
+func nullErr(path string) *string {
+	msg := fmt.Sprintf("Received null for required field: '%s'", path)
+	return &msg
+}
+
+func returnVal(val reflect.Value, desirePtr bool, field *Field, convertedType, path string) (reflect.Value, error) {
+	if field.Type != convertedType {
+		msg := fmt.Sprintf("Type mismatch for '%s' - Expected: %s Got: %v", path, field.Type, convertedType)
+		return zeroVal, &TypeError{path: path, msg: msg}
+	}
+
+	return checkPointer(val, desirePtr)
+}
+
+func checkPointer(val reflect.Value, desirePtr bool) (reflect.Value, error) {
 	if desirePtr {
 		return val.Addr(), nil
 	}
