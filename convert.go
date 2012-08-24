@@ -15,7 +15,7 @@ type TypeError struct {
 }
 
 func (e *TypeError) Error() string {
-	return fmt.Sprintf("barrister: type error: %s: %s", e.path, e.msg)
+	return fmt.Sprintf("barrister: %s: %s", e.path, e.msg)
 }
 
 type Convert struct {
@@ -24,12 +24,12 @@ type Convert struct {
 	desired   reflect.Type
 	desirePtr bool
 	actual    interface{}
-	converted interface{}
+	converted reflect.Value
 	path      string
 }
 
 func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) *Convert {
-	return &Convert{idl, field, desired, false, actual, actual, path}
+	return &Convert{idl, field, desired, false, actual, zeroVal, path}
 }
 
 func (c *Convert) Run() (reflect.Value, error) {
@@ -64,6 +64,8 @@ func (c *Convert) Run() (reflect.Value, error) {
 		kind = c.desired.Kind()
 	}
 
+	c.converted = reflect.New(c.desired)
+
 	if actType.Kind() == kind {
 		//fmt.Printf("%v is assignable to %v\n", actType, desired)
 		v := reflect.New(c.desired).Elem()
@@ -78,7 +80,8 @@ func (c *Convert) Run() (reflect.Value, error) {
 					if ok {
 						for _, enumVal := range enum {
 							if enumVal.Value == s {
-								return checkPointer(v, c.desirePtr)
+								c.converted.Elem().SetString(s)
+								return c.convertedVal()
 							}
 						}
 
@@ -103,52 +106,69 @@ func (c *Convert) Run() (reflect.Value, error) {
 	case reflect.Int:
 		s, ok := c.actual.(int)
 		if ok {
-			c.converted = int64(s)
+			c.converted.Elem().SetInt(int64(s))
 			return c.returnVal("int")
 		}
-		_, ok = c.actual.(int64)
+		s2, ok := c.actual.(int64)
 		if ok {
+			c.converted.Elem().SetInt(s2)
 			return c.returnVal("int")
 		}
 	case reflect.Int64:
 		s, ok := c.actual.(int64)
 		if ok {
-			c.converted = s
+			c.converted.Elem().SetInt(s)
 			return c.returnVal("int")
 		}
 		s2, ok := c.actual.(int)
 		if ok {
-			c.converted = int64(s2)
+			c.converted.Elem().SetInt(int64(s2))
 			return c.returnVal("int")
 		}
 		s3, ok := c.actual.(float64)
 		if ok {
 			s4 := int64(s3)
 			if float64(s4) == s3 {
-				c.converted = s4
+				c.converted.Elem().SetInt(s4)
 				return c.returnVal("int")
 			}
 		}
 	case reflect.Float32:
 		s, ok := c.actual.(float32)
 		if ok {
-			c.converted = float64(s)
+			c.converted.Elem().SetFloat(float64(s))
 			return c.returnVal("float")
 		}
 	case reflect.Float64:
 		s, ok := c.actual.(float64)
 		if ok {
-			c.converted = s
+			c.converted.Elem().SetFloat(s)
 			return c.returnVal("float")
 		}
-		s2, ok := c.actual.(float32)
+		s3, ok := c.actual.(float32)
 		if ok {
-			c.converted = float64(s2)
+			c.converted.Elem().SetFloat(float64(s3))
+			return c.returnVal("float")
+		}
+		s4, ok := c.actual.(int)
+		if ok {
+			c.converted.Elem().SetFloat(float64(s4))
+			return c.returnVal("float")
+		}
+		s5, ok := c.actual.(int64)
+		if ok {
+			c.converted.Elem().SetFloat(float64(s5))
+			return c.returnVal("float")
+		}
+		s6, ok := c.actual.(int32)
+		if ok {
+			c.converted.Elem().SetFloat(float64(s6))
 			return c.returnVal("float")
 		}
 	case reflect.Bool:
-		_, ok := c.actual.(bool)
+		b, ok := c.actual.(bool)
 		if ok {
+			c.converted.Elem().SetBool(b)
 			return c.returnVal("bool")
 		}
 	case reflect.Slice:
@@ -187,7 +207,9 @@ func (c *Convert) convertSlice() (reflect.Value, error) {
 		}
 		slice = reflect.Append(slice, conv)
 	}
-	return slice, nil
+
+	c.converted = slice
+	return c.convertedVal()
 }
 
 func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error) {
@@ -253,7 +275,9 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 			}
 		}
 	}
-	return checkPointer(val.Elem(), c.desirePtr)
+
+	c.converted = val
+	return c.convertedVal()
 }
 
 func (c *Convert) returnVal(convertedType string) (reflect.Value, error) {
@@ -263,7 +287,14 @@ func (c *Convert) returnVal(convertedType string) (reflect.Value, error) {
 		return zeroVal, &TypeError{path: c.path, msg: msg}
 	}
 
-	return checkPointer(reflect.ValueOf(c.converted), c.desirePtr)
+	return c.convertedVal()
+}
+
+func (c *Convert) convertedVal() (reflect.Value, error) {
+	if c.desirePtr || c.converted.Kind() != reflect.Ptr {
+		return c.converted, nil
+	} 
+	return c.converted.Elem(), nil
 }
 
 func capitalize(s string) string {
@@ -274,11 +305,4 @@ func capitalize(s string) string {
 		return strings.ToUpper(s)
 	}
 	return strings.ToUpper(s[0:1]) + s[1:]
-}
-
-func checkPointer(val reflect.Value, desirePtr bool) (reflect.Value, error) {
-	if desirePtr {
-		return val.Addr(), nil
-	}
-	return val, nil
 }

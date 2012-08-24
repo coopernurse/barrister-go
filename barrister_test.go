@@ -314,6 +314,7 @@ func TestConvert(t *testing.T) {
 
 	strField := &Field{Type: "string", Optional: false, IsArray: false}
 	enumField := &Field{Type: "StringAlias", Optional: false, IsArray: false}
+	arrField := &Field{Type: "float", Optional: false, IsArray: true}
 
 	noNestStruct := &Struct{Name: "NoNesting", Fields: []Field{
 		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
@@ -343,6 +344,7 @@ func TestConvert(t *testing.T) {
 	cases := []ConvertTest{
 		ConvertTest{"hi", "hi", strField, true},
 		ConvertTest{"", 10, strField, false},
+	ConvertTest{[]float64{1, 2.1, 3}, []interface{}{1, 2.1, 3}, arrField, true},
 		ConvertTest{StringAlias("blah"), "blah", enumField, true},
 		ConvertTest{StringAlias("invalid"), "invalid", enumField, false},
 		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},
@@ -361,7 +363,7 @@ func TestConvert(t *testing.T) {
 		if test.ok {
 			if err != nil {
 				t.Errorf("%s - Couldn't convert %v to %v: %v",
-					msg, test.input, reflect.TypeOf(test.target).Name(), err)
+					msg, test.input, reflect.TypeOf(test.target), err)
 			} else {
 				if val.Kind() == reflect.Ptr {
 					val = val.Elem()
