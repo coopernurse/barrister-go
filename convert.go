@@ -49,9 +49,6 @@ func (c *Convert) Run() (reflect.Value, error) {
 
 	actType := reflect.TypeOf(c.actual)
 
-	goal := fmt.Sprintf("convert: %v - %v to %v", c.path,
-		actType.Kind().String(), c.desired)
-
 	//fmt.Printf("%s\n", goal)
 
 	if actType == c.desired {
@@ -175,7 +172,7 @@ func (c *Convert) Run() (reflect.Value, error) {
 		actVal := reflect.ValueOf(c.actual)
 		actType := actVal.Type()
 		if actType.Kind() == reflect.Slice {
-			return c.convertSlice()
+			return c.convertSlice(actVal)
 		}
 	case reflect.Struct:
 		m, ok := c.actual.(map[string]interface{})
@@ -184,28 +181,36 @@ func (c *Convert) Run() (reflect.Value, error) {
 		}
 	}
 
+	goal := fmt.Sprintf("convert: %v - %v to %v", c.path,
+		actType.Kind().String(), c.desired)
+
 	return zeroVal, &TypeError{c.path, "Unable to " + goal}
 }
 
-func (c *Convert) convertSlice() (reflect.Value, error) {
-	actVal := reflect.ValueOf(c.actual)
-	sliceType := c.desired.Elem()
-	sliceV := reflect.New(c.desired)
-	slice := sliceV.Elem()
+func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
+	length := actVal.Len()
+	slice := reflect.MakeSlice(c.desired, length, length)
 
 	elemField := &Field{Name: c.field.Name, Type: c.field.Type,
 		Optional: c.field.Optional, IsArray: false}
 
-	for x := 0; x < actVal.Len(); x++ {
+	sliceType := c.desired.Elem()
+
+	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "")
+
+	for x := 0; x < length; x++ {
+
 		el := actVal.Index(x)
-		elemPath := fmt.Sprintf("%s[%d]", c.path, x)
-		elemConv := NewConvert(c.idl, elemField, sliceType,
-			el.Interface(), elemPath)
+		elemConv.actual = el.Interface()
+
+		elemConv.path = c.path + "[" + string(x) + "]"
+
 		conv, err := elemConv.Run()
 		if err != nil {
 			return zeroVal, err
 		}
-		slice = reflect.Append(slice, conv)
+
+		slice.Index(x).Set(conv)
 	}
 
 	c.converted = slice
@@ -293,7 +298,7 @@ func (c *Convert) returnVal(convertedType string) (reflect.Value, error) {
 func (c *Convert) convertedVal() (reflect.Value, error) {
 	if c.desirePtr || c.converted.Kind() != reflect.Ptr {
 		return c.converted, nil
-	} 
+	}
 	return c.converted.Elem(), nil
 }
 

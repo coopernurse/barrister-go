@@ -344,7 +344,7 @@ func TestConvert(t *testing.T) {
 	cases := []ConvertTest{
 		ConvertTest{"hi", "hi", strField, true},
 		ConvertTest{"", 10, strField, false},
-	ConvertTest{[]float64{1, 2.1, 3}, []interface{}{1, 2.1, 3}, arrField, true},
+		ConvertTest{[]float64{1, 2.1, 3}, []interface{}{1, 2.1, 3}, arrField, true},
 		ConvertTest{StringAlias("blah"), "blah", enumField, true},
 		ConvertTest{StringAlias("invalid"), "invalid", enumField, false},
 		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},
@@ -429,5 +429,79 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 			}
 		}
 
+	}
+}
+
+func BenchmarkConvertSlice(b *testing.B) {
+	b.StopTimer()
+	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	arrField := &Field{Type: "float", Optional: false, IsArray: true}
+
+	cases := []ConvertTest{
+		ConvertTest{[]float64{}, []interface{}{1, 2.1, 3, 30.3, 32.0, 32323.3, 1, 2.1, 3, 30.3, 32.0, 32323.3}, arrField, true},
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		for _, test := range cases {
+			targetType := reflect.TypeOf(test.target)
+			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.Run()
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+}
+
+func BenchmarkConvertString(b *testing.B) {
+	b.StopTimer()
+	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	strField := &Field{Type: "string", Optional: false, IsArray: false}
+
+	cases := []ConvertTest{
+		ConvertTest{"hi", "hi", strField, true},
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		for _, test := range cases {
+			targetType := reflect.TypeOf(test.target)
+			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.Run()
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+}
+
+func BenchmarkConvertStruct(b *testing.B) {
+	b.StopTimer()
+	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	noNestStruct := &Struct{Name: "NoNesting", Fields: []Field{
+		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
+		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
+		Field{Name: "C", Type: "float", Optional: true, IsArray: false},
+		Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
+		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
+	}}
+	noNestField := &Field{Type: "NoNesting", Optional: false, IsArray: true}
+	idl.Structs["NoNesting"] = noNestStruct
+
+	cases := []ConvertTest{
+		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		for _, test := range cases {
+			targetType := reflect.TypeOf(test.target)
+			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.Run()
+			if err != nil {
+				panic(err)
+			}
+		}
 	}
 }
