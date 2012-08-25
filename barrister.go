@@ -56,7 +56,7 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 func NewIdl(elems []IdlJsonElem) *Idl {
 	idl := &Idl{
 		elems:      elems,
-		interfaces: map[string]string{},
+		interfaces: map[string][]Function{},
 		methods:    map[string]Function{},
 		structs:    map[string]*Struct{},
 		enums:      map[string][]EnumValue{},
@@ -66,11 +66,13 @@ func NewIdl(elems []IdlJsonElem) *Idl {
 		if el.Type == "meta" {
 			idl.Meta = Meta{el.BarristerVersion, el.DateGenerated * 1000000, el.Checksum}
 		} else if el.Type == "interface" {
-			idl.interfaces[el.Name] = el.Name
+			funcs := []Function{}
 			for _, f := range el.Functions {
 				meth := fmt.Sprintf("%s.%s", el.Name, f.Name)
 				idl.methods[meth] = f
+				funcs = append(funcs, f)
 			}
+			idl.interfaces[el.Name] = funcs
 		} else if el.Type == "struct" {
 			idl.structs[el.Name] = &Struct{Name: el.Name, Extends: el.Extends, Fields: el.Fields}
 		} else if el.Type == "enum" {
@@ -152,7 +154,7 @@ type Idl struct {
 	Meta  Meta
 
 	// hashed elements
-	interfaces map[string]string
+	interfaces map[string][]Function
 	methods    map[string]Function
 	structs    map[string]*Struct
 	enums      map[string][]EnumValue
@@ -320,8 +322,67 @@ type Server struct {
 }
 
 func (s *Server) AddHandler(iface string, impl interface{}) {
-	// TODO: verify that iface is in the idl
+	ifaceFuncs, ok := s.idl.interfaces[iface]
+
+	if !ok {
+		msg := fmt.Sprintf("barrister: IDL has no interface: %s", iface)
+		panic(msg)
+	}
+
+	rpcErrKind := reflect.TypeOf(JsonRpcError{}).Kind()
+
+	elem := reflect.ValueOf(impl)
+	for _, idlFunc := range(ifaceFuncs) {
+		fname := capitalize(idlFunc.Name)
+		fn := elem.MethodByName(fname)
+		if fn == zeroVal {
+			msg := fmt.Sprintf("barrister: %s impl has no method named: %s", 
+				iface, fname)
+			panic(msg)
+		}
+
+		fnType := fn.Type()
+		if fnType.NumIn() != len(idlFunc.Params) {
+			msg := fmt.Sprintf("barrister: %s impl method: %s accepts %d params but IDL specifies %d", iface, fname, fnType.NumIn(), len(idlFunc.Params))
+			panic(msg)
+		}
+
+		if fnType.NumOut() != 2 {
+			msg := fmt.Sprintf("barrister: %s impl method: %s returns %d params but must be 2", iface, fname, fnType.NumOut())
+			panic(msg)
+		}
+
+		for x, param := range idlFunc.Params {
+			path := fmt.Sprintf("%s.%s param[%d]", iface, fname, x)
+			s.validate(param, fnType.In(x), path)
+		}
+
+		path := fmt.Sprintf("%s.%s return value[0]", iface, fname)
+		s.validate(idlFunc.Returns, fnType.Out(0), path)
+
+		errType := fnType.Out(1)
+		if errType.Kind() != reflect.Ptr || errType.Elem().Kind() != rpcErrKind {
+			msg := fmt.Sprintf("%s.%s return value[1] has invalid type: %s (expected: *barrister.JsonRpcError)", iface, fname, errType)
+			panic(msg)
+		}
+	}
+
 	s.handlers[iface] = impl
+}
+
+func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
+	testElem := reflect.New(implType).Elem()
+	testVal := testElem.Interface()
+	if idlField.Optional {
+		testVal = testElem.Interface()
+	}
+
+	conv := NewConvert(s.idl, &idlField, implType, testVal, "", true)
+	_, err := conv.Run()
+	if err != nil {
+		msg := fmt.Sprintf("barrister: %s has invalid type: %s (expected: %s)", path, implType, idlField.Type)
+		panic(msg)
+	}
 }
 
 func (s *Server) InvokeJSON(j []byte) []byte {
@@ -451,7 +512,7 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		desiredType := fnType.In(x)
 		idlField := idlFunc.Params[x]
 		path := fmt.Sprintf("param[%d]", x)
-		paramConv := NewConvert(s.idl, &idlField, desiredType, param, path)
+		paramConv := NewConvert(s.idl, &idlField, desiredType, param, path, false)
 		converted, err := paramConv.Run()
 		if err != nil {
 			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}

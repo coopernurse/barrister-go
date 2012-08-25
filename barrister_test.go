@@ -9,6 +9,99 @@ import (
 	"testing"
 )
 
+var strField = &Field{Type: "string", Optional: false, IsArray: false}
+var enumField = &Field{Type: "StringAlias", Optional: false, IsArray: false}
+var arrField = &Field{Type: "float", Optional: false, IsArray: true}
+
+var noNestStruct = &Struct{Name: "NoNesting", Fields: []Field{
+		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
+		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
+		Field{Name: "C", Type: "float", Optional: true, IsArray: false},
+		Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
+		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
+	}}
+var noNestField = &Field{Type: "NoNesting", Optional: false, IsArray: true}
+
+var nestStruct = &Struct{Name: "Nested", Fields: []Field{
+		Field{Name: "name", Type: "string", Optional: false, IsArray: false},
+		Field{Name: "Nest", Type: "NoNesting", Optional: false, IsArray: false},
+	}}
+var nestField = &Field{Type: "Nested", Optional: false, IsArray: true}
+
+type ConvertTest struct {
+	target interface{}
+	input  interface{}
+	field  *Field
+	ok     bool
+}
+
+type NoNesting struct {
+	A string
+	B int64
+	C float64
+	D bool
+	E []string
+}
+
+type StringAlias string
+
+type Nested struct {
+	Name string
+	Nest NoNesting
+}
+
+type BImpl struct{}
+
+func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
+	if s == "return-null" {
+		return nil, nil
+	}
+	return &s, nil
+}
+
+type BImpl_MissingFunc struct {}
+
+type BImpl_BadParam struct {}
+func (b BImpl_BadParam) Echo(f float64) (*string, *JsonRpcError) {
+	s := "blah"
+	return &s, nil
+}
+
+type BImpl_BadReturn struct {}
+func (b BImpl_BadReturn) Echo(s string) (int, *JsonRpcError) {
+	return 10, nil
+}
+
+type BImpl_BadReturn2 struct {}
+func (b BImpl_BadReturn2) Echo(s string) (*string, int) {
+	s2 := "blah"
+	return &s2, 0
+}
+
+type BImpl_BadReturn3 struct {}
+func (b BImpl_BadReturn3) Echo(s string) (*string) {
+	s2 := "blah"
+	return &s2
+}
+
+type EchoCall struct {
+	in  string
+	out interface{}
+}
+
+type ValidateCase struct {
+	field Field
+	val   interface{}
+	err   string
+}
+
+type CallFail struct {
+	method  string
+	errcode int
+}
+
+//////////////////////////////////////
+
 func readFile(fname string) []byte {
 	b, err := ioutil.ReadFile(fname)
 	if err != nil {
@@ -26,6 +119,18 @@ func parseTestIdl() *Idl {
 	if err != nil {
 		panic(err)
 	}
+	return idl
+}
+
+func createTestIdl() *Idl {
+	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
+	idl.structs["NoNesting"] = noNestStruct
+	idl.structs["Nested"] = nestStruct
+	idl.enums["StringAlias"] = []EnumValue{
+		EnumValue{"blah", ""},
+		EnumValue{"foo", ""},
+	}
+	idl.computeAllStructFields()
 	return idl
 }
 
@@ -81,8 +186,9 @@ func TestParseIdlJson(t *testing.T) {
 		DeepEquals(t, ex, idl.elems[i])
 	}
 
-	expectedIfaces := map[string]string{"A": "A", "B": "B"}
-	DeepEquals(t, idl.interfaces, expectedIfaces)
+	Equals(t, 2, len(idl.interfaces))
+	Equals(t, 7, len(idl.interfaces["A"]))
+	Equals(t, 1, len(idl.interfaces["B"]))
 
 	methodKeys := []string{
 		"A.add", "A.calc", "A.sqrt", "A.repeat", "A.say_hi",
@@ -123,28 +229,6 @@ func TestParseIdlJson(t *testing.T) {
 		t.Errorf("MathOp enum: %v != %v", idl.enums["MathOp"], mathOps)
 	}
 
-}
-
-///////////////////////////////
-
-type BImpl struct{}
-
-func (b BImpl) Echo(s string) (*string, *JsonRpcError) {
-	if s == "return-null" {
-		return nil, nil
-	}
-	return &s, nil
-}
-
-type EchoCall struct {
-	in  string
-	out interface{}
-}
-
-type ValidateCase struct {
-	field Field
-	val   interface{}
-	err   string
 }
 
 func TestServerBarristerIdl(t *testing.T) {
@@ -194,11 +278,6 @@ func TestServerCallSuccess(t *testing.T) {
 			t.Errorf("B.echo %v != %v", resStr, call.out)
 		}
 	}
-}
-
-type CallFail struct {
-	method  string
-	errcode int
 }
 
 func TestServerCallFail(t *testing.T) {
@@ -251,57 +330,8 @@ func TestParseStuff(t *testing.T) {
 	}
 }
 
-type ConvertTest struct {
-	target interface{}
-	input  interface{}
-	field  *Field
-	ok     bool
-}
-
-type NoNesting struct {
-	A string
-	B int64
-	C float64
-	D bool
-	E []string
-}
-
-type StringAlias string
-
-type Nested struct {
-	Name string
-	Nest NoNesting
-}
-
 func TestConvert(t *testing.T) {
-
-	strField := &Field{Type: "string", Optional: false, IsArray: false}
-	enumField := &Field{Type: "StringAlias", Optional: false, IsArray: false}
-	arrField := &Field{Type: "float", Optional: false, IsArray: true}
-
-	noNestStruct := &Struct{Name: "NoNesting", Fields: []Field{
-		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
-		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
-		Field{Name: "C", Type: "float", Optional: true, IsArray: false},
-		Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
-		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
-	}}
-	noNestField := &Field{Type: "NoNesting", Optional: false, IsArray: true}
-
-	nestStruct := &Struct{Name: "Nested", Fields: []Field{
-		Field{Name: "name", Type: "string", Optional: false, IsArray: false},
-		Field{Name: "Nest", Type: "NoNesting", Optional: false, IsArray: false},
-	}}
-	nestField := &Field{Type: "Nested", Optional: false, IsArray: true}
-
-	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
-	idl.structs["NoNesting"] = noNestStruct
-	idl.structs["Nested"] = nestStruct
-	idl.enums["StringAlias"] = []EnumValue{
-		EnumValue{"blah", ""},
-		EnumValue{"foo", ""},
-	}
-	idl.computeAllStructFields()
+	idl := createTestIdl()
 
 	cases := []ConvertTest{
 		ConvertTest{"hi", "hi", strField, true},
@@ -320,7 +350,7 @@ func TestConvert(t *testing.T) {
 	for x, test := range cases {
 		msg := fmt.Sprintf("TestConvert[%d]", x)
 		targetType := reflect.TypeOf(test.target)
-		conv := NewConvert(idl, test.field, targetType, test.input, msg)
+		conv := NewConvert(idl, test.field, targetType, test.input, msg, false)
 		val, err := conv.Run()
 		if test.ok {
 			if err != nil {
@@ -394,6 +424,50 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 	}
 }
 
+func TestAddHandlerPanicsIfIfaceNotInIdl(t *testing.T) {
+	idl := createTestIdl()
+	svr := NewServer(idl)
+
+	fx := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// ok
+			}
+		}()
+		svr.AddHandler("C", BImpl{})
+		t.Errorf("AddHandler didn't panic when called w/invalid iface name")
+	}
+	fx()
+}
+
+func TestAddHandlerPanicsIfImplDoesntMatchInterface(t *testing.T) {
+	idl := parseTestIdl()
+	svr := NewServer(idl)
+
+	badHandlers := []interface{}{
+		BImpl_MissingFunc{},
+		BImpl_BadParam{},
+		BImpl_BadReturn{},
+		BImpl_BadReturn2{},
+		BImpl_BadReturn3{},
+	}
+
+	for x, handler := range(badHandlers) {
+		fx := func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// ok
+				}
+			}()
+			svr.AddHandler("B", handler)
+			t.Errorf("[%d] - AddHandler() allowed invalid handler impl", x)
+		}
+		fx()
+	}
+}
+
+///////////////////////////////
+
 func BenchmarkConvertSlice(b *testing.B) {
 	b.StopTimer()
 	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
@@ -407,7 +481,7 @@ func BenchmarkConvertSlice(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			conv := NewConvert(idl, test.field, targetType, test.input, "", false)
 			_, err := conv.Run()
 			if err != nil {
 				panic(err)
@@ -429,7 +503,7 @@ func BenchmarkConvertString(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			conv := NewConvert(idl, test.field, targetType, test.input, "", false)
 			_, err := conv.Run()
 			if err != nil {
 				panic(err)
@@ -459,7 +533,7 @@ func BenchmarkConvertStruct(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
+			conv := NewConvert(idl, test.field, targetType, test.input, "", false)
 			_, err := conv.Run()
 			if err != nil {
 				panic(err)

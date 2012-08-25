@@ -26,32 +26,20 @@ type Convert struct {
 	actual    interface{}
 	converted reflect.Value
 	path      string
+	strict    bool
 }
 
-func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) *Convert {
-	return &Convert{idl, field, desired, false, actual, zeroVal, path}
+func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string, strict bool) *Convert {
+	return &Convert{idl, field, desired, false, actual, zeroVal, path, strict}
 }
 
 func (c *Convert) Run() (reflect.Value, error) {
 	kind := c.desired.Kind()
 
-	if c.actual == nil {
-		if kind == reflect.Ptr {
-			if c.field.Optional {
-				return reflect.ValueOf(nil), nil
-			} else {
-				return zeroVal, &TypeError{c.path, "null not allowed"}
-			}
-		} else {
-			return zeroVal, &TypeError{c.path, "Unable to convert nil to non-pointer"}
-		}
-	}
-
 	actType := reflect.TypeOf(c.actual)
 
-	//fmt.Printf("%s\n", goal)
-
-	if actType == c.desired {
+	if actType == c.desired && !c.strict {
+		// return value without checking IDL
 		return reflect.ValueOf(c.actual), nil
 	}
 
@@ -59,12 +47,20 @@ func (c *Convert) Run() (reflect.Value, error) {
 		c.desirePtr = true
 		c.desired = c.desired.Elem()
 		kind = c.desired.Kind()
+
+		actVal := reflect.ValueOf(c.actual)
+		if actVal.IsNil() {
+			if c.field.Optional {
+				return reflect.ValueOf(nil), nil
+			} else {
+				return zeroVal, &TypeError{c.path, "null not allowed"}
+			}
+		}
 	}
 
 	c.converted = reflect.New(c.desired)
 
 	if actType.Kind() == kind {
-		//fmt.Printf("%v is assignable to %v\n", actType, desired)
 		v := reflect.New(c.desired).Elem()
 		switch kind {
 		case reflect.String:
@@ -96,10 +92,10 @@ func (c *Convert) Run() (reflect.Value, error) {
 
 	switch kind {
 	case reflect.String:
-		_, ok := c.actual.(string)
-		if ok {
-			return c.returnVal("string")
-		}
+        _, ok := c.actual.(string)
+        if ok {
+            return c.returnVal("string")
+        }
 	case reflect.Int:
 		s, ok := c.actual.(int)
 		if ok {
@@ -181,10 +177,10 @@ func (c *Convert) Run() (reflect.Value, error) {
 		}
 	}
 
-	goal := fmt.Sprintf("convert: %v - %v to %v", c.path,
+	msg := fmt.Sprintf("Unable to convert: %v - %v to %v", c.path,
 		actType.Kind().String(), c.desired)
 
-	return zeroVal, &TypeError{c.path, "Unable to " + goal}
+	return zeroVal, &TypeError{c.path, msg}
 }
 
 func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
@@ -196,7 +192,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 
 	sliceType := c.desired.Elem()
 
-	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "")
+	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "", c.strict)
 
 	for x := 0; x < length; x++ {
 
@@ -252,7 +248,7 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 		if ok {
 
 			fieldConv := NewConvert(c.idl, &sField, structField.Type, mval,
-				c.path+"."+fname)
+				c.path+"."+fname, c.strict)
 			conv, err := fieldConv.Run()
 			if err != nil {
 				return zeroVal, err
