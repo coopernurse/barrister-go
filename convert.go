@@ -73,7 +73,7 @@ func (c *Convert) Run() (reflect.Value, error) {
 				v.SetString(s)
 
 				if c.field.Type != "string" {
-					enum, ok := c.idl.Enums[c.field.Type]
+					enum, ok := c.idl.enums[c.field.Type]
 					if ok {
 						for _, enumVal := range enum {
 							if enumVal.Value == s {
@@ -91,7 +91,7 @@ func (c *Convert) Run() (reflect.Value, error) {
 			}
 		}
 	} else {
-		//fmt.Printf("%v is NOT assignable to %v\n", actType, desired)
+		//fmt.Printf("%v is NOT assignable to %v\n", actType, c.desired)
 	}
 
 	switch kind {
@@ -219,7 +219,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 
 func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error) {
 
-	idlStruct, ok := c.idl.Structs[c.field.Type]
+	idlStruct, ok := c.idl.structs[c.field.Type]
 
 	if !ok {
 		msg := fmt.Sprintf("Struct not found in IDL: %s", c.field.Type)

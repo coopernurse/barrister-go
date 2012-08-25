@@ -50,33 +50,37 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 		return nil, err
 	}
 
+	return NewIdl(elems), nil
+}
+
+func NewIdl(elems []IdlJsonElem) *Idl {
 	idl := &Idl{
-		Elems:      elems,
-		Interfaces: map[string]string{},
-		Methods:    map[string]Function{},
-		Structs:    map[string]*Struct{},
-		Enums:      map[string][]EnumValue{},
+		elems:      elems,
+		interfaces: map[string]string{},
+		methods:    map[string]Function{},
+		structs:    map[string]*Struct{},
+		enums:      map[string][]EnumValue{},
 	}
 
 	for _, el := range elems {
 		if el.Type == "meta" {
 			idl.Meta = Meta{el.BarristerVersion, el.DateGenerated * 1000000, el.Checksum}
 		} else if el.Type == "interface" {
-			idl.Interfaces[el.Name] = el.Name
+			idl.interfaces[el.Name] = el.Name
 			for _, f := range el.Functions {
 				meth := fmt.Sprintf("%s.%s", el.Name, f.Name)
-				idl.Methods[meth] = f
+				idl.methods[meth] = f
 			}
 		} else if el.Type == "struct" {
-			idl.Structs[el.Name] = &Struct{Name: el.Name, Extends: el.Extends, Fields: el.Fields}
+			idl.structs[el.Name] = &Struct{Name: el.Name, Extends: el.Extends, Fields: el.Fields}
 		} else if el.Type == "enum" {
-			idl.Enums[el.Name] = el.Values
+			idl.enums[el.Name] = el.Values
 		}
 	}
 
-	idl.ComputeAllStructFields()
+	idl.computeAllStructFields()
 
-	return idl, nil
+	return idl
 }
 
 type IdlJsonElem struct {
@@ -142,31 +146,33 @@ type Meta struct {
 
 type Idl struct {
 	// raw data from IDL file
-	Elems []IdlJsonElem
+	elems []IdlJsonElem
+
+	// meta information about the contract
 	Meta  Meta
 
 	// hashed elements
-	Interfaces map[string]string
-	Methods    map[string]Function
-	Structs    map[string]*Struct
-	Enums      map[string][]EnumValue
+	interfaces map[string]string
+	methods    map[string]Function
+	structs    map[string]*Struct
+	enums      map[string][]EnumValue
 }
 
-func (idl *Idl) ComputeAllStructFields() {
-	for _, s := range idl.Structs {
-		s.computed = idl.ComputeStructFields(s, map[string]Field{})
+func (idl *Idl) computeAllStructFields() {
+	for _, s := range idl.structs {
+		s.computed = idl.computeStructFields(s, map[string]Field{})
 	}
 }
 
-func (idl *Idl) ComputeStructFields(toAdd *Struct, computed map[string]Field) map[string]Field {
+func (idl *Idl) computeStructFields(toAdd *Struct, computed map[string]Field) map[string]Field {
 	for _, f := range toAdd.Fields {
 		computed[f.Name] = f
 	}
 
 	if toAdd.Extends != "" {
-		parent, ok := idl.Structs[toAdd.Extends]
+		parent, ok := idl.structs[toAdd.Extends]
 		if ok {
-			computed = idl.ComputeStructFields(parent, computed)
+			computed = idl.computeStructFields(parent, computed)
 		}
 	}
 
@@ -177,7 +183,7 @@ func (idl *Idl) GenerateGo(pkgName string) []byte {
 	s := bytes.Buffer{}
 	s.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
 
-	for _, el := range idl.Elems {
+	for _, el := range idl.elems {
 		if el.Type == "comment" {
 			for _, line := range strings.Split(el.Value, "\n") {
 				s.WriteString("// ")
@@ -372,7 +378,7 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
-		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.Elems}
+		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.elems}
 	} else {
 		// handle normal RPC method executions
 		var result interface{}
@@ -392,9 +398,26 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: rpcerr}
 }
 
+func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
+	batchResp := make([]JsonRpcResponse, len(batch))
+	
+	for _, req := range(batch) {
+		result, err := s.Call(req.Method, req.Params)
+		resp := JsonRpcResponse{Jsonrpc: "2.0", Id: req.Id}
+		if err == nil {
+			resp.Result = result
+		} else {
+			resp.Error = err
+		}
+		batchResp = append(batchResp, resp)
+	}
+
+	return batchResp
+}
+
 func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
 
-	idlFunc, ok := s.idl.Methods[method]
+	idlFunc, ok := s.idl.methods[method]
 	if !ok {
 		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}
 	}

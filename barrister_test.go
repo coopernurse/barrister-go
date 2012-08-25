@@ -1,10 +1,9 @@
-package barrister_test
+package barrister
 
 import (
+	. "github.com/sdegutis/go.assert"
 	"encoding/json"
 	"fmt"
-	. "github.com/coopernurse/barrister-go"
-	. "github.com/sdegutis/go.assert"
 	"io/ioutil"
 	"reflect"
 	"testing"
@@ -44,53 +43,53 @@ func TestParseIdlJson(t *testing.T) {
 	meta := Meta{BarristerVersion: "0.1.2", DateGenerated: 1337654725230000000, Checksum: "34f6238ed03c6319017382e0fdc638a7"}
 
 	expected := Idl{Meta: meta}
-	expected.Elems = append(expected.Elems, IdlJsonElem{Type: "comment", Value: "Barrister conformance IDL\n\nThe bits in here have silly names and the operations\nare not intended to be useful.  The intent is to\nexercise as much of the IDL grammar as possible"})
+	expected.elems = append(expected.elems, IdlJsonElem{Type: "comment", Value: "Barrister conformance IDL\n\nThe bits in here have silly names and the operations\nare not intended to be useful.  The intent is to\nexercise as much of the IDL grammar as possible"})
 
 	enumVals := []EnumValue{
 		EnumValue{Value: "ok"},
 		EnumValue{Value: "err"},
 	}
-	expected.Elems = append(expected.Elems,
+	expected.elems = append(expected.elems,
 		IdlJsonElem{Type: "enum", Name: "Status", Values: enumVals})
 
 	enumVals2 := []EnumValue{
 		EnumValue{Value: "add"},
 		EnumValue{Value: "multiply", Comment: "mult comment"},
 	}
-	expected.Elems = append(expected.Elems,
+	expected.elems = append(expected.elems,
 		IdlJsonElem{Type: "enum", Name: "MathOp", Values: enumVals2})
 
 	fields := []Field{
 		Field{Optional: false, IsArray: false, Type: "Status", Name: "status"},
 	}
-	expected.Elems = append(expected.Elems, IdlJsonElem{
+	expected.elems = append(expected.elems, IdlJsonElem{
 		Type: "struct", Name: "Response", Fields: fields})
 
 	fields2 := []Field{
 		Field{Optional: false, IsArray: false, Type: "int", Name: "count"},
 		Field{Optional: false, IsArray: true, Type: "string", Name: "items"},
 	}
-	expected.Elems = append(expected.Elems,
+	expected.elems = append(expected.elems,
 		IdlJsonElem{Type: "struct", Name: "RepeatResponse",
 			Extends: "Response", Fields: fields2,
 			Comment: "testing struct inheritance"})
 
 	DeepEquals(t, expected.Meta, idl.Meta)
-	Equals(t, len(idl.Elems), 11)
+	Equals(t, len(idl.elems), 11)
 
-	for i, ex := range expected.Elems {
-		DeepEquals(t, ex, idl.Elems[i])
+	for i, ex := range expected.elems {
+		DeepEquals(t, ex, idl.elems[i])
 	}
 
 	expectedIfaces := map[string]string{"A": "A", "B": "B"}
-	DeepEquals(t, idl.Interfaces, expectedIfaces)
+	DeepEquals(t, idl.interfaces, expectedIfaces)
 
 	methodKeys := []string{
 		"A.add", "A.calc", "A.sqrt", "A.repeat", "A.say_hi",
 		"A.repeat_num", "A.putPerson", "B.echo",
 	}
 	for _, key := range methodKeys {
-		_, ok := idl.Methods[key]
+		_, ok := idl.methods[key]
 		if !ok {
 			t.Errorf("No method with key: %s", key)
 		}
@@ -100,7 +99,7 @@ func TestParseIdlJson(t *testing.T) {
 		"Response", "RepeatResponse", "HiResponse", "RepeatRequest", "Person",
 	}
 	for _, key := range structKeys {
-		_, ok := idl.Structs[key]
+		_, ok := idl.structs[key]
 		if !ok {
 			t.Errorf("No struct with key: %s", key)
 		}
@@ -110,7 +109,7 @@ func TestParseIdlJson(t *testing.T) {
 		"Status", "MathOp",
 	}
 	for _, key := range enumKeys {
-		_, ok := idl.Enums[key]
+		_, ok := idl.enums[key]
 		if !ok {
 			t.Errorf("No enum with key: %s", key)
 		}
@@ -120,8 +119,8 @@ func TestParseIdlJson(t *testing.T) {
 		EnumValue{"add", ""},
 		EnumValue{"multiply", "mult comment"},
 	}
-	if !reflect.DeepEqual(idl.Enums["MathOp"], mathOps) {
-		t.Errorf("MathOp enum: %v != %v", idl.Enums["MathOp"], mathOps)
+	if !reflect.DeepEqual(idl.enums["MathOp"], mathOps) {
+		t.Errorf("MathOp enum: %v != %v", idl.enums["MathOp"], mathOps)
 	}
 
 }
@@ -148,42 +147,6 @@ type ValidateCase struct {
 	err   string
 }
 
-/*
-func TestValidate(t *testing.T) {
-	idl := parseTestIdl()
-
-	f := Field{Name: "email", Type: "string", Optional: false, IsArray: false}
-	f2 := Field{Name: "age", Type: "int", Optional: false, IsArray: false}
-
-	testCases := []ValidateCase{
-		ValidateCase{f, "foo", ""},
-		ValidateCase{f, "", ""},
-		ValidateCase{f, 10, "Type mismatch for 'email' - Expected: string Got: int"},
-		ValidateCase{f, nil, "Received null for required field: 'email'"},
-
-		ValidateCase{f2, 10, ""},
-		ValidateCase{f2, "", "Type mismatch for 'age' - Expected: int Got: string"},
-		ValidateCase{f2, float64(10.3), "Type mismatch for 'age' - Expected: int Got: float64"},
-		ValidateCase{f2, nil, "Received null for required field: 'age'"},
-	}
-
-	for _, test := range testCases {
-		err := idl.Validate(test.field, test.val, test.field.Name)
-		if err != nil && test.err != "" {
-			if *err != test.err {
-				t.Errorf("Field: %v  Val: %v - %s != %s", test.field, test.val, test.err, *err)
-			}
-		} else if err != nil {
-			t.Errorf("Field: %v  Val: %v - Validate returned %s, but expected nil",
-				test.field, test.val, *err)
-		} else if test.err != "" {
-			t.Errorf("Field: %v  Val: %v - Validate returned nil, but expected: %s",
-				test.field, test.val, test.err)
-		}
-	}
-}
-*/
-
 func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
 	svr := NewServer(idl)
@@ -199,7 +162,7 @@ func TestServerBarristerIdl(t *testing.T) {
 
 	//fmt.Printf("%v\n", rpcResp.Result)
 
-	DeepEquals(t, idl.Elems, rpcResp.Result)
+	DeepEquals(t, idl.elems, rpcResp.Result)
 }
 
 func TestServerCallSuccess(t *testing.T) {
@@ -331,15 +294,14 @@ func TestConvert(t *testing.T) {
 	}}
 	nestField := &Field{Type: "Nested", Optional: false, IsArray: true}
 
-	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
-	idl.Structs["NoNesting"] = noNestStruct
-	idl.Structs["Nested"] = nestStruct
-	idl.Enums["StringAlias"] = []EnumValue{
+	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
+	idl.structs["NoNesting"] = noNestStruct
+	idl.structs["Nested"] = nestStruct
+	idl.enums["StringAlias"] = []EnumValue{
 		EnumValue{"blah", ""},
 		EnumValue{"foo", ""},
 	}
-
-	idl.ComputeAllStructFields()
+	idl.computeAllStructFields()
 
 	cases := []ConvertTest{
 		ConvertTest{"hi", "hi", strField, true},
@@ -434,7 +396,7 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 
 func BenchmarkConvertSlice(b *testing.B) {
 	b.StopTimer()
-	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
 	arrField := &Field{Type: "float", Optional: false, IsArray: true}
 
 	cases := []ConvertTest{
@@ -456,7 +418,7 @@ func BenchmarkConvertSlice(b *testing.B) {
 
 func BenchmarkConvertString(b *testing.B) {
 	b.StopTimer()
-	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
 	strField := &Field{Type: "string", Optional: false, IsArray: false}
 
 	cases := []ConvertTest{
@@ -478,7 +440,7 @@ func BenchmarkConvertString(b *testing.B) {
 
 func BenchmarkConvertStruct(b *testing.B) {
 	b.StopTimer()
-	idl := &Idl{Structs: map[string]*Struct{}, Enums: map[string][]EnumValue{}}
+	idl := &Idl{structs: map[string]*Struct{}, enums: map[string][]EnumValue{}}
 	noNestStruct := &Struct{Name: "NoNesting", Fields: []Field{
 		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
 		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
@@ -487,7 +449,7 @@ func BenchmarkConvertStruct(b *testing.B) {
 		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
 	}}
 	noNestField := &Field{Type: "NoNesting", Optional: false, IsArray: true}
-	idl.Structs["NoNesting"] = noNestStruct
+	idl.structs["NoNesting"] = noNestStruct
 
 	cases := []ConvertTest{
 		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},
