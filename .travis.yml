@@ -1,3 +1,9 @@
 language: go
 install:
   - go get github.com/sdegutis/go.assert
+before_script:
+  - mkdir -p conform/generated
+after_script:
+  - go build conform/generated/conform.go
+  - go build conform/client.go
+  - go build conform/server.go
