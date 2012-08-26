@@ -182,7 +182,6 @@ func (c *convert) run() (reflect.Value, error) {
 
 	msg := fmt.Sprintf("Unable to convert: %v - %v to %v", c.path,
 		actType.Kind().String(), c.desired)
-	fmt.Printf("%s\n", msg)
 	return zeroVal, &TypeError{c.path, msg}
 }
 

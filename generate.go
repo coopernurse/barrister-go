@@ -56,7 +56,7 @@ func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
 		if x == 0 {
 			typeStr = goName
 		}
-		line(b, 1, fmt.Sprintf("%s%s %s = \"%s\"", 
+		line(b, 1, fmt.Sprintf("%s%s %s = \"%s\"",
 			goName, capitalize(val.Value), typeStr, val.Value))
 	}
 	line(b, 0, ")\n")
@@ -71,7 +71,7 @@ func (g *generateGo) generateStruct(b *bytes.Buffer, s *Struct) {
 		if f.Optional {
 			omit = ",omitempty"
 		}
-		line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`", 
+		line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`",
 			goName, f.goType(g.optionalToPtr), f.Name, omit))
 	}
 	line(b, 0, "}\n")
@@ -119,7 +119,7 @@ func (g *generateGo) generateInterface(b *bytes.Buffer, ifaceName string) {
 			}
 			params += fmt.Sprintf("%s %s", p.Name, p.goType(g.optionalToPtr))
 		}
-		line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)", 
+		line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)",
 			goName, params, fn.Returns.goType(g.optionalToPtr)))
 	}
 }
@@ -149,9 +149,9 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 			paramIdents += ", "
 			paramIdents += p.Name
 		}
-		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {", 
+		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {",
 			goName, fnName, params, retType))
-		line(b, 1, fmt.Sprintf("_res, _err := _p.client.Call(\"%s\"%s)", 
+		line(b, 1, fmt.Sprintf("_res, _err := _p.client.Call(\"%s\"%s)",
 			method, paramIdents))
 		line(b, 1, "if _err == nil {")
 		if g.optionalToPtr && fn.Returns.Optional {
@@ -183,18 +183,18 @@ func comment(b *bytes.Buffer, level int, comment string) {
 func line(b *bytes.Buffer, level int, s string) {
 	for i := 0; i < level; i++ {
 		b.WriteString("\t")
-    }		
+	}
 	b.WriteString(s)
 	b.WriteString("\n")
 }
 
 func sortedKeys(m map[string][]Function) []string {
 	mk := make([]string, len(m))
-    i := 0
-    for k, _ := range m {
-        mk[i] = k
-        i++
-    }
-    sort.Strings(mk)
+	i := 0
+	for k, _ := range m {
+		mk[i] = k
+		i++
+	}
+	sort.Strings(mk)
 	return mk
 }

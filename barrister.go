@@ -354,8 +354,8 @@ type Serializer interface {
 	MimeType() string
 }
 
-type JsonSerializer struct { 
-	ForceASCII    bool
+type JsonSerializer struct {
+	ForceASCII bool
 }
 
 func (s *JsonSerializer) Marshal(in interface{}) ([]byte, error) {
@@ -363,7 +363,7 @@ func (s *JsonSerializer) Marshal(in interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if s.ForceASCII {
 		buf, err := EncodeASCII(b)
 		if err != nil {
@@ -453,14 +453,14 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch unable to Marshal request: %s", err)
 		return []JsonRpcResponse{
-			JsonRpcResponse{Error: &JsonRpcError{Code: -32600, Message: msg} }}
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32600, Message: msg}}}
 	}
 
 	respBytes, err := c.trans.Send(reqBytes)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch Transport error during request: %s", err)
 		return []JsonRpcResponse{
-			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg} }}
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg}}}
 	}
 
 	var batchResp []JsonRpcResponse
@@ -468,7 +468,7 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch unable to Unmarshal response: %s", err)
 		return []JsonRpcResponse{
-			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg} }}
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg}}}
 	}
 
 	return batchResp
@@ -517,7 +517,7 @@ func NewServer(idl *Idl, ser Serializer) Server {
 
 type Server struct {
 	idl      *Idl
-    ser      Serializer
+	ser      Serializer
 	handlers map[string]interface{}
 }
 
@@ -731,7 +731,8 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	buf := bytes.Buffer{}
-	_, err := buf.ReadFrom(req.Body); if err != nil {
+	_, err := buf.ReadFrom(req.Body)
+	if err != nil {
 		panic(err)
 	}
 	resp := s.InvokeBytes(buf.Bytes())
@@ -773,4 +774,3 @@ func jsonParseErr(reqId string, batch bool, err error) []byte {
 	}
 	return b
 }
-
