@@ -141,7 +141,7 @@ func TestConvert(t *testing.T) {
 
 func TestAddHandlerPanicsIfIfaceNotInIdl(t *testing.T) {
 	idl := createTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 
 	fx := func() {
 		defer func() {

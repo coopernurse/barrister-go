@@ -183,7 +183,7 @@ func TestServerCallSuccess(t *testing.T) {
 	aimpl := AImpl{}
 	bimpl := BImpl{}
 	idl := parseTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 	svr.AddHandler("A", aimpl)
 	svr.AddHandler("B", bimpl)
 
@@ -241,7 +241,7 @@ func TestServerCallSuccess(t *testing.T) {
 func TestServerCallFail(t *testing.T) {
 	bimpl := BImpl{}
 	idl := parseTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 	svr.AddHandler("B", bimpl)
 
 	calls := []CallFail{
@@ -267,7 +267,7 @@ func TestServerCallFail(t *testing.T) {
 func TestServerInvokeJSONSuccess(t *testing.T) {
 	bimpl := BImpl{}
 	idl := parseTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 	svr.AddHandler("B", bimpl)
 
 	calls := []EchoCall{
@@ -283,7 +283,7 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 			panic(err)
 		}
 
-		resBytes := svr.InvokeJSON(reqBytes)
+		resBytes := svr.InvokeBytes(reqBytes)
 		resp := JsonRpcResponse{}
 		err = json.Unmarshal(resBytes, &resp)
 		if err != nil {
@@ -316,7 +316,7 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 
 func TestAddHandlerPanicsIfImplDoesntMatchInterface(t *testing.T) {
 	idl := parseTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 
 	badHandlers := []interface{}{
 		BImpl_MissingFunc{},
@@ -431,11 +431,11 @@ func TestParseIdlJson(t *testing.T) {
 
 func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
-	svr := NewServer(idl)
+	svr := NewJSONServer(idl, true)
 
 	rpcReq := JsonRpcRequest{Id: "123", Method: "barrister-idl", Params: ""}
 	reqJson, _ := json.Marshal(rpcReq)
-	respJson := svr.InvokeJSON(reqJson)
+	respJson := svr.InvokeBytes(reqJson)
 	rpcResp := BarristerIdlRpcResponse{}
 	err := json.Unmarshal(respJson, &rpcResp)
 	if err != nil {

@@ -306,6 +306,8 @@ func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
 		idl.generateProxy(b, name, optionalToPtr)
 	}
 
+	idl.generateNewServer(b)
+
 	return b.Bytes()
 }
 
@@ -342,6 +344,30 @@ func (idl *Idl) generateStruct(b *bytes.Buffer, s *Struct, optionalToPtr bool) {
 			goName, f.goType(optionalToPtr), f.Name, omit))
 	}
 	line(b, 0, "}\n")
+}
+
+func (idl *Idl) generateNewServer(b *bytes.Buffer) {
+	ifaces := ""
+	ifaceIdents := ""
+	for name, _ := range idl.interfaces {
+		upper := capitalize(name)
+		lower := strings.ToLower(name)
+		ifaces = fmt.Sprintf("%s, %s %s", ifaces, lower, upper)
+		ifaceIdents += ", " + lower
+	}
+
+	line(b, 0, fmt.Sprintf("func NewJSONServer(idl *barrister.Idl, forceASCII bool%s) barrister.Server {", ifaces))
+	line(b, 1, fmt.Sprintf("return NewServer(idl, &barrister.JsonSerializer{forceASCII}%s)", ifaceIdents))
+	line(b, 0, "}\n")
+
+	line(b, 0, fmt.Sprintf("func NewServer(idl *barrister.Idl, ser barrister.Serializer%s) barrister.Server {", ifaces))
+	line(b, 1, fmt.Sprintf("_svr := barrister.NewServer(idl, ser)"))
+	for name, _ := range idl.interfaces {
+		lower := strings.ToLower(name)
+		line(b, 1, fmt.Sprintf("_svr.AddHandler(\"%s\", %s)", name, lower))
+	}
+	line(b, 1, "return _svr")
+	line(b, 0, "}")
 }
 
 func (idl *Idl) generateInterface(b *bytes.Buffer, ifaceName string, optionalToPtr bool) {
@@ -471,6 +497,7 @@ type BarristerIdlRpcResponse struct {
 type Serializer interface {
 	Marshal(in interface{}) ([]byte, error)
 	Unmarshal(in []byte, out interface{}) error
+	IsBatch(b []byte) bool
 }
 
 type JsonSerializer struct { 
@@ -495,6 +522,19 @@ func (s *JsonSerializer) Marshal(in interface{}) ([]byte, error) {
 
 func (s *JsonSerializer) Unmarshal(in []byte, out interface{}) error {
 	return json.Unmarshal(in, out)
+}
+
+func (s *JsonSerializer) IsBatch(b []byte) bool {
+	batch := false
+	for i := 0; i < len(b); i++ {
+		if b[i] == '{' {
+			break
+		} else if b[i] == '[' {
+			batch = true
+			break
+		}
+	}
+	return batch
 }
 
 type Transport interface {
@@ -605,12 +645,17 @@ func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, 
 // Server //
 ////////////
 
-func NewServer(idl *Idl) Server {
-	return Server{idl, map[string]interface{}{}}
+func NewJSONServer(idl *Idl, forceASCII bool) Server {
+	return NewServer(idl, &JsonSerializer{forceASCII})
+}
+
+func NewServer(idl *Idl, ser Serializer) Server {
+	return Server{idl, ser, map[string]interface{}{}}
 }
 
 type Server struct {
 	idl      *Idl
+    ser      Serializer
 	handlers map[string]interface{}
 }
 
@@ -673,25 +718,17 @@ func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
 	}
 }
 
-func (s *Server) InvokeJSON(j []byte) []byte {
+func (s *Server) InvokeBytes(req []byte) []byte {
 
 	// determine if batch or single
-	batch := false
-	for i := 0; i < len(j); i++ {
-		if j[i] == '{' {
-			break
-		} else if j[i] == '[' {
-			batch = true
-			break
-		}
-	}
+	batch := s.ser.IsBatch(req)
 
 	if batch {
 		var batchReq []JsonRpcRequest
 		batchResp := []JsonRpcResponse{}
-		err := json.Unmarshal(j, &batchReq)
+		err := s.ser.Unmarshal(req, &batchReq)
 		if err != nil {
-			return jsonParseErr("", err)
+			return jsonParseErr("", true, err)
 		}
 
 		for _, req := range batchReq {
@@ -699,7 +736,7 @@ func (s *Server) InvokeJSON(j []byte) []byte {
 			batchResp = append(batchResp, *resp)
 		}
 
-		b, _ := json.Marshal(batchResp)
+		b, err := s.ser.Marshal(batchResp)
 		if err != nil {
 			panic(err)
 		}
@@ -708,14 +745,14 @@ func (s *Server) InvokeJSON(j []byte) []byte {
 
 	//  - parse json into JsonRpcRequest
 	rpcReq := JsonRpcRequest{}
-	err := json.Unmarshal(j, &rpcReq)
+	err := s.ser.Unmarshal(req, &rpcReq)
 	if err != nil {
-		return jsonParseErr("", err)
+		return jsonParseErr("", false, err)
 	}
 
 	resp := s.InvokeOne(&rpcReq)
 
-	b, _ := json.Marshal(resp)
+	b, err := s.ser.Marshal(resp)
 	if err != nil {
 		panic(err)
 	}
@@ -847,12 +884,25 @@ func ParseMethod(method string) (string, string) {
 	return method, ""
 }
 
-func jsonParseErr(reqId string, err error) []byte {
+func jsonParseErr(reqId string, batch bool, err error) []byte {
 	rpcerr := &JsonRpcError{Code: -32700, Message: fmt.Sprintf("Unable to parse JSON: %s", err.Error())}
 	resp := JsonRpcResponse{Jsonrpc: "2.0"}
 	resp.Id = reqId
 	resp.Error = rpcerr
-	b, _ := json.Marshal(resp)
+
+	if batch {
+		respBatch := []JsonRpcResponse{resp}
+		b, err := json.Marshal(respBatch)
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
+
+	b, err := json.Marshal(resp)
+	if err != nil {
+		panic(err)
+	}
 	return b
 }
 
