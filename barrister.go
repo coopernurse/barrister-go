@@ -135,6 +135,31 @@ type Field struct {
 	Comment  string `json:"comment"`
 }
 
+func (f Field) goType(optionalToPtr bool) string {
+	if f.IsArray {
+		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
+		return "[]" + f2.goType(optionalToPtr)
+	}
+
+	prefix := ""
+	if optionalToPtr && f.Optional {
+		prefix = "*"
+	}
+
+	switch f.Type {
+	case "string":
+		return prefix + "string"
+	case "int":
+		return prefix + "int64"
+	case "float":
+		return prefix + "float64"
+	case "bool":
+		return prefix + "bool"
+	}
+
+	return prefix + f.Type
+}
+
 func (f Field) testVal(idl *Idl) interface{} {
 
 	if f.IsArray {
@@ -220,22 +245,74 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields map[string]Field) m
 	return allFields
 }
 
-func (idl *Idl) GenerateGo(pkgName string) []byte {
-	s := bytes.Buffer{}
-	s.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
+func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
+	b := &bytes.Buffer{}
+	line(b, fmt.Sprintf("package %s\n", pkgName))
+	line(b, "import \"github.com/coopernurse/barrister-go\"\n")
 
-	for _, el := range idl.elems {
-		if el.Type == "comment" {
-			for _, line := range strings.Split(el.Value, "\n") {
-				s.WriteString("// ")
-				s.WriteString(line)
-				s.WriteString("\n")
+	for name, en := range idl.enums {
+		goName := capitalize(name)
+		line(b, fmt.Sprintf("type %s string", goName))
+		line(b, "const (")
+		for x, val := range en {
+			typeStr := ""
+			if x == 0 {
+				typeStr = goName
 			}
+			line(b, fmt.Sprintf("\t%s%s %s = \"%s\"", 
+				goName, capitalize(val.Value), typeStr, val.Value))
 		}
-		s.WriteString("\n")
+		line(b, ")\n")
 	}
 
-	return s.Bytes()
+	for _, s := range idl.structs {
+		goName := capitalize(s.Name)
+		line(b, fmt.Sprintf("type %s struct {", goName))
+		for _, f := range s.allFields {
+			goName = capitalize(f.Name)
+			omit := ""
+			if f.Optional {
+				omit = ",omitempty"
+			}
+			line(b, fmt.Sprintf("\t%s\t%s\t`json:\"%s%s\"`", 
+				goName, f.goType(optionalToPtr), f.Name, omit))
+		}
+		line(b, "}\n")
+	}
+	line(b, "")
+
+	for name, funcs := range idl.interfaces {
+		goName := capitalize(name)
+		line(b, fmt.Sprintf("type %s interface {", goName))
+		for _, fn := range funcs {
+			goName = capitalize(fn.Name)
+			params := ""
+			for x, p := range fn.Params {
+				if x > 0 {
+					params += ", "
+				}
+				params += fmt.Sprintf("%s %s", p.Name, p.goType(optionalToPtr))
+			}
+			line(b, fmt.Sprintf("\t%s(%s) (%s, *barrister.JsonRpcError)", 
+				goName, params, fn.Returns.goType(optionalToPtr)))
+		}
+		line(b, "}\n")
+	}
+
+	return b.Bytes()
+}
+
+func comment(b *bytes.Buffer, comment string) {
+	if comment != "" {
+		for _, ln := range strings.Split(comment, "\n") {
+			line(b, fmt.Sprintf("// %s", ln))
+		}
+	}
+}
+
+func line(b *bytes.Buffer, s string) {
+	b.WriteString(s)
+	b.WriteString("\n")
 }
 
 //////////////////////////////////////////////////

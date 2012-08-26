@@ -64,12 +64,11 @@ func createTestIdl() *Idl {
 	return idl
 }
 
-// not ready yet..
-func testIdl2Go(t *testing.T) {
+func TestIdl2Go(t *testing.T) {
 	idl := parseTestIdl()
 
-	code := idl.GenerateGo("conform")
-	ioutil.WriteFile("conform.go", code, 0644)
+	code := idl.GenerateGo("conform", true)
+	ioutil.WriteFile("test/conform.go", code, 0644)
 }
 
 func TestParseMethod(t *testing.T) {
