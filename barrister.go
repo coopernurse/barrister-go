@@ -541,8 +541,8 @@ func (s *Server) AddHandler(iface string, impl interface{}) {
 
 func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
 	testVal := idlField.testVal(s.idl)
-	conv := NewConvert(s.idl, &idlField, implType, testVal, "")
-	_, err := conv.Run()
+	conv := newConvert(s.idl, &idlField, implType, testVal, "")
+	_, err := conv.run()
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s has invalid type: %s reason: %s", path, implType, err)
 		panic(msg)
@@ -668,8 +668,8 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		desiredType := fnType.In(x)
 		idlField := idlFunc.Params[x]
 		path := fmt.Sprintf("param[%d]", x)
-		paramConv := NewConvert(s.idl, &idlField, desiredType, param, path)
-		converted, err := paramConv.Run()
+		paramConv := newConvert(s.idl, &idlField, desiredType, param, path)
+		converted, err := paramConv.run()
 		if err != nil {
 			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
 		}

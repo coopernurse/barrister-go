@@ -115,8 +115,8 @@ func TestConvert(t *testing.T) {
 	for x, test := range cases {
 		msg := fmt.Sprintf("TestConvert[%d]", x)
 		targetType := reflect.TypeOf(test.target)
-		conv := NewConvert(idl, test.field, targetType, test.input, msg)
-		val, err := conv.Run()
+		conv := newConvert(idl, test.field, targetType, test.input, msg)
+		val, err := conv.run()
 		if test.ok {
 			if err != nil {
 				t.Errorf("%s - Couldn't convert %v to %v: %v",
@@ -170,8 +170,8 @@ func BenchmarkConvertSlice(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
-			_, err := conv.Run()
+			conv := newConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.run()
 			if err != nil {
 				panic(err)
 			}
@@ -192,8 +192,8 @@ func BenchmarkConvertString(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
-			_, err := conv.Run()
+			conv := newConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.run()
 			if err != nil {
 				panic(err)
 			}
@@ -222,8 +222,8 @@ func BenchmarkConvertStruct(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, test := range cases {
 			targetType := reflect.TypeOf(test.target)
-			conv := NewConvert(idl, test.field, targetType, test.input, "")
-			_, err := conv.Run()
+			conv := newConvert(idl, test.field, targetType, test.input, "")
+			_, err := conv.run()
 			if err != nil {
 				panic(err)
 			}

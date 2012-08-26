@@ -18,7 +18,7 @@ func (e *TypeError) Error() string {
 	return fmt.Sprintf("barrister: %s: %s", e.path, e.msg)
 }
 
-type Convert struct {
+type convert struct {
 	idl       *Idl
 	field     *Field
 	desired   reflect.Type
@@ -28,11 +28,11 @@ type Convert struct {
 	path      string
 }
 
-func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) *Convert {
-	return &Convert{idl, field, desired, false, actual, zeroVal, path}
+func newConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) *convert {
+	return &convert{idl, field, desired, false, actual, zeroVal, path}
 }
 
-func (c *Convert) Run() (reflect.Value, error) {
+func (c *convert) run() (reflect.Value, error) {
 	kind := c.desired.Kind()
 
 	actType := reflect.TypeOf(c.actual)
@@ -187,7 +187,7 @@ func (c *Convert) Run() (reflect.Value, error) {
 	return zeroVal, &TypeError{c.path, msg}
 }
 
-func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
+func (c *convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 	length := actVal.Len()
 	slice := reflect.MakeSlice(c.desired, length, length)
 
@@ -196,7 +196,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 
 	sliceType := c.desired.Elem()
 
-	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "")
+	elemConv := newConvert(c.idl, elemField, sliceType, nil, "")
 
 	for x := 0; x < length; x++ {
 
@@ -205,7 +205,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 
 		elemConv.path = c.path + "[" + string(x) + "]"
 
-		conv, err := elemConv.Run()
+		conv, err := elemConv.run()
 		if err != nil {
 			return zeroVal, err
 		}
@@ -217,7 +217,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 	return c.convertedVal()
 }
 
-func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error) {
+func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error) {
 
 	idlStruct, ok := c.idl.structs[c.field.Type]
 
@@ -251,9 +251,9 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 
 		if ok {
 
-			fieldConv := NewConvert(c.idl, &sField, structField.Type, mval,
+			fieldConv := newConvert(c.idl, &sField, structField.Type, mval,
 				c.path+"."+fname)
-			conv, err := fieldConv.Run()
+			conv, err := fieldConv.run()
 			if err != nil {
 				return zeroVal, err
 			}
@@ -285,7 +285,7 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 	return c.convertedVal()
 }
 
-func (c *Convert) returnVal(convertedType string) (reflect.Value, error) {
+func (c *convert) returnVal(convertedType string) (reflect.Value, error) {
 	if c.field.Type != convertedType {
 		msg := fmt.Sprintf("Type mismatch for '%s' - Expected: %s Got: %v",
 			c.path, c.field.Type, convertedType)
@@ -295,7 +295,7 @@ func (c *Convert) returnVal(convertedType string) (reflect.Value, error) {
 	return c.convertedVal()
 }
 
-func (c *Convert) convertedVal() (reflect.Value, error) {
+func (c *convert) convertedVal() (reflect.Value, error) {
 	if c.desirePtr || c.converted.Kind() != reflect.Ptr {
 		return c.converted, nil
 	}
