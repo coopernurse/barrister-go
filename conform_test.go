@@ -1,61 +1,63 @@
 package barrister
 
 import (
-	. "github.com/sdegutis/go.assert"
-	"fmt"
 	"encoding/json"
-	"reflect"
-	"math"
+	"fmt"
+	. "github.com/sdegutis/go.assert"
 	"io/ioutil"
+	"math"
+	"reflect"
 	"testing"
 )
 
 // enums from conform.idl
 type Status string
+
 const (
-	StatusOk   Status = "ok"
-	StatusErr  = "err"
+	StatusOk  Status = "ok"
+	StatusErr        = "err"
 )
 
 type MathOp string
+
 const (
-	MathOpAdd  MathOp = "add"
-	MathOpMultiply = "multiply"
+	MathOpAdd      MathOp = "add"
+	MathOpMultiply        = "multiply"
 )
 
 // structs from conform.idl
 type Response struct {
-    Status Status    `json:"status"`
+	Status Status `json:"status"`
 }
 
 type RepeatResponse struct {
-	Status Status     `json:"status"`
-    Count  int        `json:"count"`
-    Items  []string   `json:"items"`
+	Status Status   `json:"status"`
+	Count  int      `json:"count"`
+	Items  []string `json:"items"`
 }
 
 type HiResponse struct {
-	Hi string   `json:"hi"`
+	Hi string `json:"hi"`
 }
 
 type RepeatRequest struct {
-    To_repeat        string  `json:"to_repeat"`
-    Count            int64   `json:"count"`
-    Force_uppercase  bool    `json:"force_uppercase"`
+	To_repeat       string `json:"to_repeat"`
+	Count           int64  `json:"count"`
+	Force_uppercase bool   `json:"force_uppercase"`
 }
 
 type Person struct {
-    PersonId  string   `json:"personId"`
-    FirstName string   `json:"firstName"`
-    LastName  string   `json:"lastName"`
-    Email     *string  `json:"email"`
+	PersonId  string  `json:"personId"`
+	FirstName string  `json:"firstName"`
+	LastName  string  `json:"lastName"`
+	Email     *string `json:"email"`
 }
 
 // implementation of "A" interface from conform.idl
 type AImpl struct{}
 
 func (i AImpl) Add(a int64, b int64) (int64, *JsonRpcError) {
-	return a+b, nil
+	return a + b, nil
 }
 
 func (i AImpl) Calc(nums []float64, operation MathOp) (float64, *JsonRpcError) {
@@ -109,27 +111,31 @@ func (i BImpl) Echo(s string) (*string, *JsonRpcError) {
 	return &s, nil
 }
 
-type BImpl_MissingFunc struct {}
+type BImpl_MissingFunc struct{}
 
-type BImpl_BadParam struct {}
+type BImpl_BadParam struct{}
+
 func (b BImpl_BadParam) Echo(f float64) (*string, *JsonRpcError) {
 	s := "blah"
 	return &s, nil
 }
 
-type BImpl_BadReturn struct {}
+type BImpl_BadReturn struct{}
+
 func (b BImpl_BadReturn) Echo(s string) (int, *JsonRpcError) {
 	return 10, nil
 }
 
-type BImpl_BadReturn2 struct {}
+type BImpl_BadReturn2 struct{}
+
 func (b BImpl_BadReturn2) Echo(s string) (*string, int) {
 	s2 := "blah"
 	return &s2, 0
 }
 
-type BImpl_BadReturn3 struct {}
-func (b BImpl_BadReturn3) Echo(s string) (*string) {
+type BImpl_BadReturn3 struct{}
+
+func (b BImpl_BadReturn3) Echo(s string) *string {
 	s2 := "blah"
 	return &s2
 }
@@ -140,10 +146,10 @@ type CallFail struct {
 }
 
 type GenericCall struct {
-	method   string
-	params   []interface{}
-	result   interface{}
-	errcode  int
+	method  string
+	params  []interface{}
+	result  interface{}
+	errcode int
 }
 
 type EchoCall struct {
@@ -182,10 +188,10 @@ func TestServerCallSuccess(t *testing.T) {
 	svr.AddHandler("B", bimpl)
 
 	genericCalls := []GenericCall{
-		GenericCall{"A.add", []interface{}{ 1, 2 }, int64(3), 0},
-		GenericCall{"A.sqrt", []interface{}{ 16 }, float64(4), 0},
-		GenericCall{"A.say_hi", []interface{}{ }, HiResponse{"hi"}, 0},
-		GenericCall{"A.calc", []interface{}{ []float64{2,3}, "multiply" }, float64(6), 0},
+		GenericCall{"A.add", []interface{}{1, 2}, int64(3), 0},
+		GenericCall{"A.sqrt", []interface{}{16}, float64(4), 0},
+		GenericCall{"A.say_hi", []interface{}{}, HiResponse{"hi"}, 0},
+		GenericCall{"A.calc", []interface{}{[]float64{2, 3}, "multiply"}, float64(6), 0},
 	}
 
 	for x, generic := range genericCalls {
@@ -200,9 +206,9 @@ func TestServerCallSuccess(t *testing.T) {
 			}
 		} else {
 			if generic.errcode == 0 {
-					t.Errorf("generic[%d] - expected success, got err: %v", x, err)
+				t.Errorf("generic[%d] - expected success, got err: %v", x, err)
 			} else if generic.errcode != err.Code {
-					t.Errorf("generic[%d] - expected errcode %d, got err: %v", x, generic.errcode, err)
+				t.Errorf("generic[%d] - expected errcode %d, got err: %v", x, generic.errcode, err)
 			}
 		}
 	}
@@ -320,7 +326,7 @@ func TestAddHandlerPanicsIfImplDoesntMatchInterface(t *testing.T) {
 		BImpl_BadReturn3{},
 	}
 
-	for x, handler := range(badHandlers) {
+	for x, handler := range badHandlers {
 		fx := func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -440,4 +446,3 @@ func TestServerBarristerIdl(t *testing.T) {
 
 	DeepEquals(t, idl.elems, rpcResp.Result)
 }
-

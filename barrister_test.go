@@ -1,9 +1,9 @@
 package barrister
 
 import (
-	. "github.com/sdegutis/go.assert"
 	"encoding/json"
 	"fmt"
+	. "github.com/sdegutis/go.assert"
 	"io/ioutil"
 	"reflect"
 	"testing"
@@ -14,18 +14,18 @@ var enumField = &Field{Type: "StringAlias", Optional: false, IsArray: false}
 var arrField = &Field{Type: "float", Optional: false, IsArray: true}
 
 var noNestStruct = &Struct{Name: "NoNesting", Fields: []Field{
-		Field{Name: "a", Type: "string", Optional: true, IsArray: false},
-		Field{Name: "b", Type: "int", Optional: true, IsArray: false},
-		Field{Name: "C", Type: "float", Optional: true, IsArray: false},
-		Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
-		Field{Name: "E", Type: "string", Optional: true, IsArray: true},
-	}}
+	Field{Name: "a", Type: "string", Optional: true, IsArray: false},
+	Field{Name: "b", Type: "int", Optional: true, IsArray: false},
+	Field{Name: "C", Type: "float", Optional: true, IsArray: false},
+	Field{Name: "d", Type: "bool", Optional: true, IsArray: false},
+	Field{Name: "E", Type: "string", Optional: true, IsArray: true},
+}}
 var noNestField = &Field{Type: "NoNesting", Optional: false, IsArray: true}
 
 var nestStruct = &Struct{Name: "Nested", Fields: []Field{
-		Field{Name: "name", Type: "string", Optional: false, IsArray: false},
-		Field{Name: "Nest", Type: "NoNesting", Optional: false, IsArray: false},
-	}}
+	Field{Name: "name", Type: "string", Optional: false, IsArray: false},
+	Field{Name: "Nest", Type: "NoNesting", Optional: false, IsArray: false},
+}}
 var nestField = &Field{Type: "Nested", Optional: false, IsArray: true}
 
 type ConvertTest struct {
@@ -139,7 +139,6 @@ func TestConvert(t *testing.T) {
 		}
 	}
 }
-
 
 func TestAddHandlerPanicsIfIfaceNotInIdl(t *testing.T) {
 	idl := createTestIdl()

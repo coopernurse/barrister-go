@@ -158,7 +158,7 @@ func (f Field) testVal(idl *Idl) interface{} {
 	s, ok := idl.structs[f.Type]
 	if ok {
 		val := map[string]interface{}{}
-		for _, f2 := range(s.allFields) {
+		for _, f2 := range s.allFields {
 			val[f2.Name] = f2.testVal(idl)
 		}
 		return val
@@ -169,7 +169,7 @@ func (f Field) testVal(idl *Idl) interface{} {
 		return e[0].Value
 	}
 
-	msg := fmt.Sprintf("Unable to create val for field: %s type: %s", 
+	msg := fmt.Sprintf("Unable to create val for field: %s type: %s",
 		f.Name, f.Type)
 	panic(msg)
 }
@@ -190,7 +190,7 @@ type Idl struct {
 	elems []IdlJsonElem
 
 	// meta information about the contract
-	Meta  Meta
+	Meta Meta
 
 	// hashed elements
 	interfaces map[string][]Function
@@ -371,11 +371,11 @@ func (s *Server) AddHandler(iface string, impl interface{}) {
 	rpcErrKind := reflect.TypeOf(JsonRpcError{}).Kind()
 
 	elem := reflect.ValueOf(impl)
-	for _, idlFunc := range(ifaceFuncs) {
+	for _, idlFunc := range ifaceFuncs {
 		fname := capitalize(idlFunc.Name)
 		fn := elem.MethodByName(fname)
 		if fn == zeroVal {
-			msg := fmt.Sprintf("barrister: %s impl has no method named: %s", 
+			msg := fmt.Sprintf("barrister: %s impl has no method named: %s",
 				iface, fname)
 			panic(msg)
 		}
@@ -495,8 +495,8 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 
 func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	batchResp := make([]JsonRpcResponse, len(batch))
-	
-	for _, req := range(batch) {
+
+	for _, req := range batch {
 		result, err := s.Call(req.Method, req.Params)
 		resp := JsonRpcResponse{Jsonrpc: "2.0", Id: req.Id}
 		if err == nil {

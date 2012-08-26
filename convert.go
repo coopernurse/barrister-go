@@ -96,10 +96,10 @@ func (c *Convert) Run() (reflect.Value, error) {
 
 	switch kind {
 	case reflect.String:
-        _, ok := c.actual.(string)
-        if ok {
-            return c.returnVal("string")
-        }
+		_, ok := c.actual.(string)
+		if ok {
+			return c.returnVal("string")
+		}
 	case reflect.Int:
 		s, ok := c.actual.(int)
 		if ok {
