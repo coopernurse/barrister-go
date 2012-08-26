@@ -26,11 +26,10 @@ type Convert struct {
 	actual    interface{}
 	converted reflect.Value
 	path      string
-	strict    bool
 }
 
-func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string, strict bool) *Convert {
-	return &Convert{idl, field, desired, false, actual, zeroVal, path, strict}
+func NewConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) *Convert {
+	return &Convert{idl, field, desired, false, actual, zeroVal, path}
 }
 
 func (c *Convert) Run() (reflect.Value, error) {
@@ -38,7 +37,7 @@ func (c *Convert) Run() (reflect.Value, error) {
 
 	actType := reflect.TypeOf(c.actual)
 
-	if actType == c.desired && !c.strict {
+	if actType == c.desired {
 		// return value without checking IDL
 		return reflect.ValueOf(c.actual), nil
 	}
@@ -49,9 +48,9 @@ func (c *Convert) Run() (reflect.Value, error) {
 		kind = c.desired.Kind()
 
 		actVal := reflect.ValueOf(c.actual)
-		if actVal.IsNil() {
+		if kind == reflect.Ptr && actVal.IsNil() {
 			if c.field.Optional {
-				return reflect.ValueOf(nil), nil
+				return actVal, nil
 			} else {
 				return zeroVal, &TypeError{c.path, "null not allowed"}
 			}
@@ -60,30 +59,35 @@ func (c *Convert) Run() (reflect.Value, error) {
 
 	c.converted = reflect.New(c.desired)
 
+	//fmt.Printf("convert: idl: %s go: %s actual: %s\n", c.field.Type, kind, actType)
+
 	if actType.Kind() == kind {
-		v := reflect.New(c.desired).Elem()
 		switch kind {
 		case reflect.String:
-			s, ok := c.actual.(string)
-			if ok {
-				v.SetString(s)
-
-				if c.field.Type != "string" {
-					enum, ok := c.idl.enums[c.field.Type]
-					if ok {
-						for _, enumVal := range enum {
-							if enumVal.Value == s {
-								c.converted.Elem().SetString(s)
-								return c.convertedVal()
-							}
-						}
-
-						msg := fmt.Sprintf("Value %s not in enum values: %v", s, enum)
-						return zeroVal, &TypeError{path: c.path, msg: msg}
-					}
-				}
-
+			actVal := reflect.ValueOf(c.actual)
+			if c.field.Type == "string" {
+				c.converted.Elem().Set(actVal)
 				return c.returnVal("string")
+			} else {
+				enum, ok := c.idl.enums[c.field.Type]
+				if ok {
+					s := actVal.String()
+					for _, enumVal := range enum {
+						if enumVal.Value == s {
+							c.converted.Elem().SetString(s)
+							return c.convertedVal()
+						}
+					}
+
+					msg := fmt.Sprintf("Value '%s' not in enum values: ", s)
+					for x, enumVal := range enum {
+						if x > 0 {
+							msg += ", "
+						}
+						msg += "'" + enumVal.Value + "'"
+					}
+					return zeroVal, &TypeError{path: c.path, msg: msg}
+				}
 			}
 		}
 	} else {
@@ -192,7 +196,7 @@ func (c *Convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
 
 	sliceType := c.desired.Elem()
 
-	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "", c.strict)
+	elemConv := NewConvert(c.idl, elemField, sliceType, nil, "")
 
 	for x := 0; x < length; x++ {
 
@@ -224,7 +228,7 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 
 	val := reflect.New(c.desired)
 
-	for fname, sField := range idlStruct.computed {
+	for fname, sField := range idlStruct.allFields {
 		goName := fname
 		structField, ok := c.desired.FieldByName(fname)
 		if !ok {
@@ -232,7 +236,7 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 			structField, ok = c.desired.FieldByName(goName)
 			if !ok {
 				msg := fmt.Sprintf("Struct: %v is missing required field: %s",
-					c.desired, fname)
+					c.desired, goName)
 				return zeroVal, &TypeError{path: c.path, msg: msg}
 			}
 		}
@@ -240,15 +244,15 @@ func (c *Convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 		mval, ok := m[fname]
 
 		if !ok && !sField.Optional {
-			msg := fmt.Sprintf("Struct value: %s is missing required field: %s",
-				c.field.Type, fname)
+			msg := fmt.Sprintf("Input value: %v is missing required field: %s",
+				m, fname)
 			return zeroVal, &TypeError{path: c.path, msg: msg}
 		}
 
 		if ok {
 
 			fieldConv := NewConvert(c.idl, &sField, structField.Type, mval,
-				c.path+"."+fname, c.strict)
+				c.path+"."+fname)
 			conv, err := fieldConv.Run()
 			if err != nil {
 				return zeroVal, err

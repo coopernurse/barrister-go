@@ -124,7 +124,7 @@ type Struct struct {
 
 	// fields in this struct, and its parents
 	// hashed by Field.Name
-	computed map[string]Field
+	allFields map[string]Field
 }
 
 type Field struct {
@@ -133,6 +133,45 @@ type Field struct {
 	Optional bool   `json:"optional"`
 	IsArray  bool   `json:"is_array"`
 	Comment  string `json:"comment"`
+}
+
+func (f Field) testVal(idl *Idl) interface{} {
+
+	if f.IsArray {
+		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
+		arr := []interface{}{}
+		arr = append(arr, f2.testVal(idl))
+		return arr
+	}
+
+	switch f.Type {
+	case "string":
+		return "testval"
+	case "int":
+		return int64(99)
+	case "float":
+		return float64(10.3)
+	case "bool":
+		return true
+	}
+
+	s, ok := idl.structs[f.Type]
+	if ok {
+		val := map[string]interface{}{}
+		for _, f2 := range(s.allFields) {
+			val[f2.Name] = f2.testVal(idl)
+		}
+		return val
+	}
+
+	e, ok := idl.enums[f.Type]
+	if ok && len(e) > 0 {
+		return e[0].Value
+	}
+
+	msg := fmt.Sprintf("Unable to create val for field: %s type: %s", 
+		f.Name, f.Type)
+	panic(msg)
 }
 
 type EnumValue struct {
@@ -162,23 +201,23 @@ type Idl struct {
 
 func (idl *Idl) computeAllStructFields() {
 	for _, s := range idl.structs {
-		s.computed = idl.computeStructFields(s, map[string]Field{})
+		s.allFields = idl.computeStructFields(s, map[string]Field{})
 	}
 }
 
-func (idl *Idl) computeStructFields(toAdd *Struct, computed map[string]Field) map[string]Field {
+func (idl *Idl) computeStructFields(toAdd *Struct, allFields map[string]Field) map[string]Field {
 	for _, f := range toAdd.Fields {
-		computed[f.Name] = f
+		allFields[f.Name] = f
 	}
 
 	if toAdd.Extends != "" {
 		parent, ok := idl.structs[toAdd.Extends]
 		if ok {
-			computed = idl.computeStructFields(parent, computed)
+			allFields = idl.computeStructFields(parent, allFields)
 		}
 	}
 
-	return computed
+	return allFields
 }
 
 func (idl *Idl) GenerateGo(pkgName string) []byte {
@@ -371,16 +410,11 @@ func (s *Server) AddHandler(iface string, impl interface{}) {
 }
 
 func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
-	testElem := reflect.New(implType).Elem()
-	testVal := testElem.Interface()
-	if idlField.Optional {
-		testVal = testElem.Interface()
-	}
-
-	conv := NewConvert(s.idl, &idlField, implType, testVal, "", true)
+	testVal := idlField.testVal(s.idl)
+	conv := NewConvert(s.idl, &idlField, implType, testVal, "")
 	_, err := conv.Run()
 	if err != nil {
-		msg := fmt.Sprintf("barrister: %s has invalid type: %s (expected: %s)", path, implType, idlField.Type)
+		msg := fmt.Sprintf("barrister: %s has invalid type: %s reason: %s", path, implType, err)
 		panic(msg)
 	}
 }
@@ -512,7 +546,7 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		desiredType := fnType.In(x)
 		idlField := idlFunc.Params[x]
 		path := fmt.Sprintf("param[%d]", x)
-		paramConv := NewConvert(s.idl, &idlField, desiredType, param, path, false)
+		paramConv := NewConvert(s.idl, &idlField, desiredType, param, path)
 		converted, err := paramConv.Run()
 		if err != nil {
 			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
