@@ -16,29 +16,6 @@ import (
 
 var zeroVal reflect.Value
 
-func EncodeASCII(b []byte) (*bytes.Buffer, error) {
-	in := bytes.NewBuffer(b)
-	out := bytes.NewBufferString("")
-	for {
-		r, size, err := in.ReadRune()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if size == 1 {
-			out.WriteRune(r)
-		} else if size == 2 {
-			out.WriteString(fmt.Sprintf("\\u%04x", r))
-		} else {
-			out.WriteString(fmt.Sprintf("\\U%08x", r))
-		}
-	}
-	return out, nil
-}
-
 //////////////////////////////////////////////////
 // IDL //
 /////////
@@ -283,177 +260,8 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields map[string]Field) m
 }
 
 func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
-	b := &bytes.Buffer{}
-	line(b, 0, fmt.Sprintf("package %s\n", pkgName))
-	line(b, 0, "import (")
-	line(b, 1, `"fmt"`)
-	line(b, 1, `"reflect"`)
-	line(b, 1, `"github.com/coopernurse/barrister-go"`)
-	line(b, 0, ")\n")
-
-	for name, _ := range idl.enums {
-		idl.generateEnum(b, name)
-	}
-
-	for _, s := range idl.structs {
-		idl.generateStruct(b, s, optionalToPtr)
-	}
-	line(b, 0, "")
-
-	for name, _ := range idl.interfaces {
-		idl.generateInterface(b, name, optionalToPtr)
-		line(b, 0, "}\n")
-		idl.generateProxy(b, name, optionalToPtr)
-	}
-
-	idl.generateNewServer(b)
-
-	return b.Bytes()
-}
-
-func (idl *Idl) generateEnum(b *bytes.Buffer, enumName string) {
-	vals, ok := idl.enums[enumName]
-	if !ok {
-		panic("No enum found: " + enumName)
-	}
-
-	goName := capitalize(enumName)
-	line(b, 0, fmt.Sprintf("type %s string", goName))
-	line(b, 0, "const (")
-	for x, val := range vals {
-		typeStr := ""
-		if x == 0 {
-			typeStr = goName
-		}
-		line(b, 1, fmt.Sprintf("%s%s %s = \"%s\"", 
-			goName, capitalize(val.Value), typeStr, val.Value))
-	}
-	line(b, 0, ")\n")
-}
-
-func (idl *Idl) generateStruct(b *bytes.Buffer, s *Struct, optionalToPtr bool) {
-	goName := capitalize(s.Name)
-	line(b, 0, fmt.Sprintf("type %s struct {", goName))
-	for _, f := range s.allFields {
-		goName = capitalize(f.Name)
-		omit := ""
-		if f.Optional {
-			omit = ",omitempty"
-		}
-		line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`", 
-			goName, f.goType(optionalToPtr), f.Name, omit))
-	}
-	line(b, 0, "}\n")
-}
-
-func (idl *Idl) generateNewServer(b *bytes.Buffer) {
-	ifaces := ""
-	ifaceIdents := ""
-	for name, _ := range idl.interfaces {
-		upper := capitalize(name)
-		lower := strings.ToLower(name)
-		ifaces = fmt.Sprintf("%s, %s %s", ifaces, lower, upper)
-		ifaceIdents += ", " + lower
-	}
-
-	line(b, 0, fmt.Sprintf("func NewJSONServer(idl *barrister.Idl, forceASCII bool%s) barrister.Server {", ifaces))
-	line(b, 1, fmt.Sprintf("return NewServer(idl, &barrister.JsonSerializer{forceASCII}%s)", ifaceIdents))
-	line(b, 0, "}\n")
-
-	line(b, 0, fmt.Sprintf("func NewServer(idl *barrister.Idl, ser barrister.Serializer%s) barrister.Server {", ifaces))
-	line(b, 1, fmt.Sprintf("_svr := barrister.NewServer(idl, ser)"))
-	for name, _ := range idl.interfaces {
-		lower := strings.ToLower(name)
-		line(b, 1, fmt.Sprintf("_svr.AddHandler(\"%s\", %s)", name, lower))
-	}
-	line(b, 1, "return _svr")
-	line(b, 0, "}")
-}
-
-func (idl *Idl) generateInterface(b *bytes.Buffer, ifaceName string, optionalToPtr bool) {
-	funcs, ok := idl.interfaces[ifaceName]
-	if !ok {
-		panic("No interface found: " + ifaceName)
-	}
-
-	goName := capitalize(ifaceName)
-	line(b, 0, fmt.Sprintf("type %s interface {", goName))
-	for _, fn := range funcs {
-		goName = capitalize(fn.Name)
-		params := ""
-		for x, p := range fn.Params {
-			if x > 0 {
-				params += ", "
-			}
-			params += fmt.Sprintf("%s %s", p.Name, p.goType(optionalToPtr))
-		}
-		line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)", 
-			goName, params, fn.Returns.goType(optionalToPtr)))
-	}
-}
-
-func (idl *Idl) generateProxy(b *bytes.Buffer, ifaceName string, optionalToPtr bool) {
-	funcs, ok := idl.interfaces[ifaceName]
-	if !ok {
-		panic("No interface found: " + ifaceName)
-	}
-
-	goName := capitalize(ifaceName) + "Proxy"
-	line(b, 0, fmt.Sprintf("type %s struct {", goName))
-	line(b, 1, "client barrister.Client")
-	line(b, 0, "}\n")
-	for _, fn := range funcs {
-		method := fmt.Sprintf("%s.%s", ifaceName, fn.Name)
-		retType := fn.Returns.goType(optionalToPtr)
-		zeroVal := fn.Returns.zeroVal(idl, optionalToPtr)
-		fnName := capitalize(fn.Name)
-		params := ""
-		paramIdents := ""
-		for x, p := range fn.Params {
-			if x > 0 {
-				params += ", "
-			}
-			params += fmt.Sprintf("%s %s", p.Name, p.goType(optionalToPtr))
-			paramIdents += ", "
-			paramIdents += p.Name
-		}
-		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {", 
-			goName, fnName, params, retType))
-		line(b, 1, fmt.Sprintf("_res, _err := _p.client.Call(\"%s\"%s)", 
-			method, paramIdents))
-		line(b, 1, "if _err == nil {")
-		if optionalToPtr && fn.Returns.Optional {
-			line(b, 2, "if _res == nil {")
-			line(b, 3, "return nil, nil")
-			line(b, 2, "}")
-		}
-		line(b, 2, fmt.Sprintf("_cast, _ok := _res.(%s)", retType))
-		line(b, 2, "if !_ok {")
-		line(b, 3, "_t := reflect.TypeOf(_res)")
-		line(b, 3, `_msg := fmt.Sprintf("`+method+` returned invalid type: %v", _t)`)
-		line(b, 3, fmt.Sprintf("return %s, &barrister.JsonRpcError{Code: -32000, Message: _msg}", zeroVal))
-		line(b, 2, "}")
-		line(b, 2, "return _cast, nil")
-		line(b, 1, "}")
-		line(b, 1, fmt.Sprintf("return %s, _err", zeroVal))
-		line(b, 0, "}\n")
-	}
-}
-
-func comment(b *bytes.Buffer, level int, comment string) {
-	if comment != "" {
-		for _, ln := range strings.Split(comment, "\n") {
-			line(b, level, fmt.Sprintf("// %s", ln))
-		}
-	}
-}
-
-func line(b *bytes.Buffer, level int, s string) {
-	for i := 0; i < level; i++ {
-		b.WriteString("\t")
-    }		
-	b.WriteString(s)
-	b.WriteString("\n")
+	g := generateGo{idl, pkgName, optionalToPtr}
+	return g.generate()
 }
 
 //////////////////////////////////////////////////
@@ -493,6 +301,29 @@ type BarristerIdlRpcResponse struct {
 //////////////////////////////////////////////////
 // Client //
 ////////////
+
+func EncodeASCII(b []byte) (*bytes.Buffer, error) {
+	in := bytes.NewBuffer(b)
+	out := bytes.NewBufferString("")
+	for {
+		r, size, err := in.ReadRune()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if size == 1 {
+			out.WriteRune(r)
+		} else if size == 2 {
+			out.WriteString(fmt.Sprintf("\\u%04x", r))
+		} else {
+			out.WriteString(fmt.Sprintf("\\U%08x", r))
+		}
+	}
+	return out, nil
+}
 
 type Serializer interface {
 	Marshal(in interface{}) ([]byte, error)
@@ -808,7 +639,7 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}
 	}
 
-	iface, fname := ParseMethod(method)
+	iface, fname := parseMethod(method)
 
 	handler, ok := s.handlers[iface]
 	if !ok {
@@ -871,7 +702,7 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 	return ret0, nil
 }
 
-func ParseMethod(method string) (string, string) {
+func parseMethod(method string) (string, string) {
 	i := strings.Index(method, ".")
 	if i > -1 && i < (len(method)-1) {
 		iface := method[0:i]

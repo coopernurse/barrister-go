@@ -80,7 +80,7 @@ func TestParseMethod(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		iface, fname := ParseMethod(c[0])
+		iface, fname := parseMethod(c[0])
 		Equals(t, iface, c[1])
 		Equals(t, fname, c[2])
 	}
