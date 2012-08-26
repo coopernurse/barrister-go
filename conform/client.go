@@ -12,7 +12,7 @@ import (
 )
 
 type RpcCaller interface {
-	Call(trans barrister.Transport) []string
+	Call(client barrister.Client) []string
 }
 
 type ParsedFile struct {
@@ -23,16 +23,15 @@ type Batch struct {
 	lines []ConformLine
 }
 
-func (b *Batch) Call(trans barrister.Transport) []string {
+func (b *Batch) Call(client barrister.Client) []string {
 	batch := []barrister.JsonRpcRequest{}
-	for x, line := range(b.lines) {
-		line.rpcid = fmt.Sprintf("id-%d", x)
+	for _, line := range(b.lines) {
 		batch = append(batch, barrister.JsonRpcRequest{Id: line.rpcid, Method: line.Method(), Params: line.Params()})
 	}
 
 	var result []string
 
-	batchResp := trans.CallBatch(batch)
+	batchResp := client.CallBatch(batch)
 	for _, resp := range(batchResp) {
 		for _, line := range(b.lines) {
 			if resp.Id == line.rpcid {
@@ -42,7 +41,6 @@ func (b *Batch) Call(trans barrister.Transport) []string {
 			}
 		}
 	}
-
 	return result
 }
 
@@ -84,16 +82,17 @@ func (line *ConformLine) HandleResponse(result interface{}, rpcerr *barrister.Js
 		body, err := json.Marshal(result); if err != nil {
 			panic(err)
 		}
-		line.act_result, err = barrister.EncodeASCII(body); if err != nil {
+		b, err := barrister.EncodeASCII(body); if err != nil {
 			panic(err)
 		}
+		line.act_result = b.String()
 	}
 }
 
-func (line *ConformLine) Call(trans barrister.Transport) []string {
+func (line *ConformLine) Call(client barrister.Client) []string {
 
 	params := line.Params()
-	res, rpcerr := trans.Call(line.Method(), params...)
+	res, rpcerr := client.Call(line.Method(), params...)
 	line.HandleResponse(res, rpcerr)
 	
 	return []string{line.String()}
@@ -104,7 +103,7 @@ func parseLine(s string) ConformLine {
 	if len(st) > 0 && string(st[0]) != "#" {
 		cols := strings.Split(s, "|")
 		if len(cols) == 5 {
-			return ConformLine{cols[0], cols[1], cols[2], cols[3], cols[4], "???", "???", ""}
+			return ConformLine{cols[0], cols[1], cols[2], cols[3], cols[4], "???", "???", barrister.RandStr(16)}
 		}
 	}
 
@@ -161,7 +160,7 @@ func main() {
 		panic(err)
 	}
 
-	trans := &barrister.HttpTransport{"http://localhost:9233"}
+	client := barrister.NewHTTPClient("http://localhost:9233", true)
 
 	fo, err := os.Create(outfile)
     if err != nil { panic(err) }
@@ -169,7 +168,7 @@ func main() {
     w := bufio.NewWriter(fo)
 
 	for _, c := range parsed.calls {
-		for _, line := range(c.Call(trans)) {
+		for _, line := range(c.Call(client)) {
 			w.WriteString(fmt.Sprintf("%s\n", line))
 		}
 	}

@@ -16,9 +16,31 @@ import (
 
 var zeroVal reflect.Value
 
+func RandStr(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := bytes.Buffer{}
+	for i := 0; i < length; i++ {
+		x := rand.Int31n(36)
+		if x < 10 {
+			b.WriteString(string(48 + x))
+		} else {
+			b.WriteString(string(87 + x))
+		}
+	}
+	return b.String()
+}
+
 //////////////////////////////////////////////////
 // IDL //
 /////////
+
+func ParseIdlJsonFile(fname string) (*Idl, error) {
+	b, err := ioutil.ReadFile(fname)
+	if err != nil {
+		return nil, err
+	}
+	return ParseIdlJson(b)
+}
 
 func ParseIdlJson(jsonData []byte) (*Idl, error) {
 
@@ -329,6 +351,7 @@ type Serializer interface {
 	Marshal(in interface{}) ([]byte, error)
 	Unmarshal(in []byte, out interface{}) error
 	IsBatch(b []byte) bool
+	MimeType() string
 }
 
 type JsonSerializer struct { 
@@ -366,6 +389,10 @@ func (s *JsonSerializer) IsBatch(b []byte) bool {
 		}
 	}
 	return batch
+}
+
+func (s *JsonSerializer) MimeType() string {
+	return "application/json"
 }
 
 type Transport interface {
@@ -412,6 +439,10 @@ type Client interface {
 	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
 }
 
+func NewHTTPClient(url string, forceASCII bool) Client {
+	return &RemoteClient{&HttpTransport{url}, &JsonSerializer{forceASCII}}
+}
+
 type RemoteClient struct {
 	trans Transport
 	ser   Serializer
@@ -444,7 +475,7 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 }
 
 func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
-	rpcReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
+	rpcReq := JsonRpcRequest{Jsonrpc: "2.0", Id: RandStr(20), Method: method, Params: params}
 
 	reqBytes, err := c.ser.Marshal(rpcReq)
 	if err != nil {
@@ -603,7 +634,7 @@ func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
 		if ok {
 			result, rpcerr = s.Call(rpcReq.Method, arr...)
 		} else {
-			result, rpcerr = s.Call(rpcReq.Method, rpcReq.Params)
+			result, rpcerr = s.Call(rpcReq.Method)
 		}
 		if rpcerr == nil {
 			// successful Call
@@ -652,6 +683,8 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
 	}
 
+	//fmt.Printf("Call method: %s  params: %v\n", method, params)
+
 	// check params
 	fnType := fn.Type()
 	if fnType.NumIn() != len(params) {
@@ -674,7 +707,6 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
 		}
 		paramVals = append(paramVals, converted)
-		//fmt.Printf("%s - %v\n", path, reflect.TypeOf(converted.Interface()))
 	}
 
 	// make the call
@@ -694,12 +726,17 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		return ret0, rpcErr
 	}
 
-	//err = s.idl.ValidateResult(method, ret0)
-	//if err != nil {
-	//	return nil, err
-	//}
-
 	return ret0, nil
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	buf := bytes.Buffer{}
+	_, err := buf.ReadFrom(req.Body); if err != nil {
+		panic(err)
+	}
+	resp := s.InvokeBytes(buf.Bytes())
+	w.Header().Set("Content-Type", s.ser.MimeType())
+	fmt.Fprintf(w, string(resp))
 }
 
 func parseMethod(method string) (string, string) {
@@ -737,16 +774,3 @@ func jsonParseErr(reqId string, batch bool, err error) []byte {
 	return b
 }
 
-func randStr(length int) string {
-	rand.Seed(time.Now().UnixNano())
-	b := bytes.Buffer{}
-	for i := 0; i < length; i++ {
-		x := rand.Int31n(36)
-		if x < 10 {
-			b.WriteString(string(48 + x))
-		} else {
-			b.WriteString(string(87 + x))
-		}
-	}
-	return b.String()
-}

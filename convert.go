@@ -33,7 +33,7 @@ func newConvert(idl *Idl, field *Field, desired reflect.Type, actual interface{}
 }
 
 func (c *convert) run() (reflect.Value, error) {
-	kind := c.desired.Kind()
+	desiredKind := c.desired.Kind()
 
 	actType := reflect.TypeOf(c.actual)
 
@@ -42,29 +42,29 @@ func (c *convert) run() (reflect.Value, error) {
 		return reflect.ValueOf(c.actual), nil
 	}
 
-	if kind == reflect.Ptr {
+	if actType == nil {
+		if c.field.Optional && desiredKind == reflect.Ptr {
+			return reflect.ValueOf(c.actual), nil
+		} else {
+			return zeroVal, &TypeError{c.path, "null not allowed"}
+		}
+	}
+
+	if desiredKind == reflect.Ptr {
 		c.desirePtr = true
 		c.desired = c.desired.Elem()
-		kind = c.desired.Kind()
-
-		actVal := reflect.ValueOf(c.actual)
-		if kind == reflect.Ptr && actVal.IsNil() {
-			if c.field.Optional {
-				return actVal, nil
-			} else {
-				return zeroVal, &TypeError{c.path, "null not allowed"}
-			}
-		}
+		desiredKind = c.desired.Kind()
 	}
 
 	c.converted = reflect.New(c.desired)
 
+	actVal := reflect.ValueOf(c.actual)
+
 	//fmt.Printf("convert: idl: %s go: %s actual: %s\n", c.field.Type, kind, actType)
 
-	if actType.Kind() == kind {
-		switch kind {
+	if actType.Kind() == desiredKind {
+		switch desiredKind {
 		case reflect.String:
-			actVal := reflect.ValueOf(c.actual)
 			if c.field.Type == "string" {
 				c.converted.Elem().Set(actVal)
 				return c.returnVal("string")
@@ -94,7 +94,7 @@ func (c *convert) run() (reflect.Value, error) {
 		//fmt.Printf("%v is NOT assignable to %v\n", actType, c.desired)
 	}
 
-	switch kind {
+	switch desiredKind {
 	case reflect.String:
 		_, ok := c.actual.(string)
 		if ok {
@@ -169,7 +169,6 @@ func (c *convert) run() (reflect.Value, error) {
 			return c.returnVal("bool")
 		}
 	case reflect.Slice:
-		actVal := reflect.ValueOf(c.actual)
 		actType := actVal.Type()
 		if actType.Kind() == reflect.Slice {
 			return c.convertSlice(actVal)
@@ -183,7 +182,7 @@ func (c *convert) run() (reflect.Value, error) {
 
 	msg := fmt.Sprintf("Unable to convert: %v - %v to %v", c.path,
 		actType.Kind().String(), c.desired)
-
+	fmt.Printf("%s\n", msg)
 	return zeroVal, &TypeError{c.path, msg}
 }
 

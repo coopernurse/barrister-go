@@ -68,7 +68,7 @@ func TestIdl2Go(t *testing.T) {
 	idl := parseTestIdl()
 
 	code := idl.GenerateGo("conform", true)
-	ioutil.WriteFile("test/conform.go", code, 0644)
+	ioutil.WriteFile("conform/generated/conform.go", code, 0644)
 }
 
 func TestParseMethod(t *testing.T) {

@@ -3,6 +3,7 @@ package barrister
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func (g *generateGo) generate() []byte {
 	}
 	line(b, 0, "")
 
-	for name, _ := range g.idl.interfaces {
+	for _, name := range sortedKeys(g.idl.interfaces) {
 		g.generateInterface(b, name)
 		line(b, 0, "}\n")
 		g.generateProxy(b, name)
@@ -77,9 +78,10 @@ func (g *generateGo) generateStruct(b *bytes.Buffer, s *Struct) {
 }
 
 func (g *generateGo) generateNewServer(b *bytes.Buffer) {
+	ifaceKeys := sortedKeys(g.idl.interfaces)
 	ifaces := ""
 	ifaceIdents := ""
-	for name, _ := range g.idl.interfaces {
+	for _, name := range ifaceKeys {
 		upper := capitalize(name)
 		lower := strings.ToLower(name)
 		ifaces = fmt.Sprintf("%s, %s %s", ifaces, lower, upper)
@@ -92,7 +94,7 @@ func (g *generateGo) generateNewServer(b *bytes.Buffer) {
 
 	line(b, 0, fmt.Sprintf("func NewServer(idl *barrister.Idl, ser barrister.Serializer%s) barrister.Server {", ifaces))
 	line(b, 1, fmt.Sprintf("_svr := barrister.NewServer(idl, ser)"))
-	for name, _ := range g.idl.interfaces {
+	for _, name := range ifaceKeys {
 		lower := strings.ToLower(name)
 		line(b, 1, fmt.Sprintf("_svr.AddHandler(\"%s\", %s)", name, lower))
 	}
@@ -184,4 +186,15 @@ func line(b *bytes.Buffer, level int, s string) {
     }		
 	b.WriteString(s)
 	b.WriteString("\n")
+}
+
+func sortedKeys(m map[string][]Function) []string {
+	mk := make([]string, len(m))
+    i := 0
+    for k, _ := range m {
+        mk[i] = k
+        i++
+    }
+    sort.Strings(mk)
+	return mk
 }
