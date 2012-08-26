@@ -123,8 +123,7 @@ type Struct struct {
 	Fields  []Field
 
 	// fields in this struct, and its parents
-	// hashed by Field.Name
-	allFields map[string]Field
+	allFields []Field
 }
 
 type Field struct {
@@ -262,20 +261,20 @@ type Idl struct {
 
 func (idl *Idl) computeAllStructFields() {
 	for _, s := range idl.structs {
-		s.allFields = idl.computeStructFields(s, map[string]Field{})
+		s.allFields = idl.computeStructFields(s, []Field{})
 	}
 }
 
-func (idl *Idl) computeStructFields(toAdd *Struct, allFields map[string]Field) map[string]Field {
-	for _, f := range toAdd.Fields {
-		allFields[f.Name] = f
-	}
-
+func (idl *Idl) computeStructFields(toAdd *Struct, allFields []Field) []Field {
 	if toAdd.Extends != "" {
 		parent, ok := idl.structs[toAdd.Extends]
 		if ok {
 			allFields = idl.computeStructFields(parent, allFields)
 		}
+	}
+
+	for _, f := range toAdd.Fields {
+		allFields = append(allFields, f)
 	}
 
 	return allFields

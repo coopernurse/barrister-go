@@ -226,7 +226,8 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 
 	val := reflect.New(c.desired)
 
-	for fname, sField := range idlStruct.allFields {
+	for _, sField := range idlStruct.allFields {
+		fname := sField.Name
 		goName := fname
 		structField, ok := c.desired.FieldByName(fname)
 		if !ok {

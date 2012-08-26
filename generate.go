@@ -7,6 +7,23 @@ import (
 	"strings"
 )
 
+var reservedWords []string = []string{
+	"break", "default", "func", "interface", "select",
+    "case", "defer", "go", "map", "struct",
+    "chan", "else", "goto", "package", "switch",
+    "const", "fallthrough", "if", "range", "type",
+	"continue", "for", "import", "return", "var",
+}
+
+func escReserved(s string) string {
+	for _, word := range reservedWords {
+		if word == s {
+			return "_" + s
+		}
+	}
+	return s
+}
+
 type generateGo struct {
 	idl           *Idl
 	pkgName       string
@@ -26,8 +43,14 @@ func (g *generateGo) generate() []byte {
 		g.generateEnum(b, name)
 	}
 
-	for _, s := range g.idl.structs {
-		g.generateStruct(b, s)
+	for _, elem := range g.idl.elems {
+		if elem.Type == "struct" {
+			s, ok := g.idl.structs[elem.Name]
+			if !ok {
+				panic("No struct found: " + elem.Name)
+			}
+			g.generateStruct(b, s)
+		}
 	}
 	line(b, 0, "")
 
@@ -83,7 +106,7 @@ func (g *generateGo) generateNewServer(b *bytes.Buffer) {
 	ifaceIdents := ""
 	for _, name := range ifaceKeys {
 		upper := capitalize(name)
-		lower := strings.ToLower(name)
+		lower := escReserved(strings.ToLower(name))
 		ifaces = fmt.Sprintf("%s, %s %s", ifaces, lower, upper)
 		ifaceIdents += ", " + lower
 	}
@@ -117,7 +140,7 @@ func (g *generateGo) generateInterface(b *bytes.Buffer, ifaceName string) {
 			if x > 0 {
 				params += ", "
 			}
-			params += fmt.Sprintf("%s %s", p.Name, p.goType(g.optionalToPtr))
+			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.optionalToPtr))
 		}
 		line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)",
 			goName, params, fn.Returns.goType(g.optionalToPtr)))
@@ -145,9 +168,10 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 			if x > 0 {
 				params += ", "
 			}
-			params += fmt.Sprintf("%s %s", p.Name, p.goType(g.optionalToPtr))
+			ident := escReserved(p.Name)
+			params += fmt.Sprintf("%s %s", ident, p.goType(g.optionalToPtr))
 			paramIdents += ", "
-			paramIdents += p.Name
+			paramIdents += ident
 		}
 		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {",
 			goName, fnName, params, retType))
