@@ -3,6 +3,7 @@ package barrister
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,7 +16,7 @@ import (
 
 var zeroVal reflect.Value
 
-func EncodeASCII(b []byte) (string, error) {
+func EncodeASCII(b []byte) (*bytes.Buffer, error) {
 	in := bytes.NewBuffer(b)
 	out := bytes.NewBufferString("")
 	for {
@@ -24,7 +25,7 @@ func EncodeASCII(b []byte) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		if size == 1 {
@@ -35,7 +36,7 @@ func EncodeASCII(b []byte) (string, error) {
 			out.WriteString(fmt.Sprintf("\\U%08x", r))
 		}
 	}
-	return out.String(), nil
+	return out, nil
 }
 
 //////////////////////////////////////////////////
@@ -160,6 +161,42 @@ func (f Field) goType(optionalToPtr bool) string {
 	return prefix + f.Type
 }
 
+func (f Field) zeroVal(idl *Idl, optionalToPtr bool) interface{} {
+
+	if f.Optional && optionalToPtr {
+		return "nil"
+	}
+
+	if f.IsArray {
+		return f.goType(false) + "{}"
+	}
+
+	switch f.Type {
+	case "string":
+		return `""`
+	case "int":
+		return "int64(0)"
+	case "float":
+		return "float64(0)"
+	case "bool":
+		return "false"
+	}
+
+	s, ok := idl.structs[f.Type]
+	if ok {
+		return capitalize(s.Name) + "{}"
+	}
+
+	e, ok := idl.enums[f.Type]
+	if ok && len(e) > 0 {
+		return `""`
+	}
+
+	msg := fmt.Sprintf("Unable to create val for field: %s type: %s",
+		f.Name, f.Type)
+	panic(msg)
+}
+
 func (f Field) testVal(idl *Idl) interface{} {
 
 	if f.IsArray {
@@ -247,43 +284,47 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields map[string]Field) m
 
 func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
 	b := &bytes.Buffer{}
-	line(b, fmt.Sprintf("package %s\n", pkgName))
-	line(b, "import \"github.com/coopernurse/barrister-go\"\n")
+	line(b, 0, fmt.Sprintf("package %s\n", pkgName))
+	line(b, 0, "import (")
+	line(b, 1, `"fmt"`)
+	line(b, 1, `"reflect"`)
+	line(b, 1, `"github.com/coopernurse/barrister-go"`)
+	line(b, 0, ")\n")
 
 	for name, en := range idl.enums {
 		goName := capitalize(name)
-		line(b, fmt.Sprintf("type %s string", goName))
-		line(b, "const (")
+		line(b, 0, fmt.Sprintf("type %s string", goName))
+		line(b, 0, "const (")
 		for x, val := range en {
 			typeStr := ""
 			if x == 0 {
 				typeStr = goName
 			}
-			line(b, fmt.Sprintf("\t%s%s %s = \"%s\"", 
+			line(b, 1, fmt.Sprintf("%s%s %s = \"%s\"", 
 				goName, capitalize(val.Value), typeStr, val.Value))
 		}
-		line(b, ")\n")
+		line(b, 0, ")\n")
 	}
 
 	for _, s := range idl.structs {
 		goName := capitalize(s.Name)
-		line(b, fmt.Sprintf("type %s struct {", goName))
+		line(b, 0, fmt.Sprintf("type %s struct {", goName))
 		for _, f := range s.allFields {
 			goName = capitalize(f.Name)
 			omit := ""
 			if f.Optional {
 				omit = ",omitempty"
 			}
-			line(b, fmt.Sprintf("\t%s\t%s\t`json:\"%s%s\"`", 
+			line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`", 
 				goName, f.goType(optionalToPtr), f.Name, omit))
 		}
-		line(b, "}\n")
+		line(b, 0, "}\n")
 	}
-	line(b, "")
+	line(b, 0, "")
 
 	for name, funcs := range idl.interfaces {
 		goName := capitalize(name)
-		line(b, fmt.Sprintf("type %s interface {", goName))
+		line(b, 0, fmt.Sprintf("type %s interface {", goName))
 		for _, fn := range funcs {
 			goName = capitalize(fn.Name)
 			params := ""
@@ -293,24 +334,68 @@ func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
 				}
 				params += fmt.Sprintf("%s %s", p.Name, p.goType(optionalToPtr))
 			}
-			line(b, fmt.Sprintf("\t%s(%s) (%s, *barrister.JsonRpcError)", 
+			line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)", 
 				goName, params, fn.Returns.goType(optionalToPtr)))
 		}
-		line(b, "}\n")
+		line(b, 0, "}\n")
+
+		goName = goName + "Proxy"
+		line(b, 0, fmt.Sprintf("type %s struct {", goName))
+		line(b, 1, "client barrister.Client")
+		line(b, 0, "}\n")
+		for _, fn := range funcs {
+			method := fmt.Sprintf("%s.%s", name, fn.Name)
+			retType := fn.Returns.goType(optionalToPtr)
+			zeroVal := fn.Returns.zeroVal(idl, optionalToPtr)
+			fnName := capitalize(fn.Name)
+			params := ""
+			paramIdents := ""
+			for x, p := range fn.Params {
+				if x > 0 {
+					params += ", "
+				}
+				params += fmt.Sprintf("%s %s", p.Name, p.goType(optionalToPtr))
+				paramIdents += ", "
+				paramIdents += p.Name
+			}
+			line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {", 
+				goName, fnName, params, retType))
+			line(b, 1, fmt.Sprintf("_res, _err := _p.client.Call(\"%s\"%s)", 
+				method, paramIdents))
+			line(b, 1, "if _err == nil {")
+			if optionalToPtr && fn.Returns.Optional {
+				line(b, 2, "if _res == nil {")
+				line(b, 3, "return nil, nil")
+				line(b, 2, "}")
+			}
+			line(b, 2, fmt.Sprintf("_cast, _ok := _res.(%s)", retType))
+			line(b, 2, "if !_ok {")
+			line(b, 3, "_t := reflect.TypeOf(_res)")
+			line(b, 3, `_msg := fmt.Sprintf("`+method+` returned invalid type: %v", _t)`)
+			line(b, 3, fmt.Sprintf("return %s, &barrister.JsonRpcError{Code: -32000, Message: _msg}", zeroVal))
+			line(b, 2, "}")
+			line(b, 2, "return _cast, nil")
+			line(b, 1, "}")
+			line(b, 1, fmt.Sprintf("return %s, _err", zeroVal))
+			line(b, 0, "}\n")
+		}
 	}
 
 	return b.Bytes()
 }
 
-func comment(b *bytes.Buffer, comment string) {
+func comment(b *bytes.Buffer, level int, comment string) {
 	if comment != "" {
 		for _, ln := range strings.Split(comment, "\n") {
-			line(b, fmt.Sprintf("// %s", ln))
+			line(b, level, fmt.Sprintf("// %s", ln))
 		}
 	}
 }
 
-func line(b *bytes.Buffer, s string) {
+func line(b *bytes.Buffer, level int, s string) {
+	for i := 0; i < level; i++ {
+		b.WriteString("\t")
+    }		
 	b.WriteString(s)
 	b.WriteString("\n")
 }
@@ -353,26 +438,51 @@ type BarristerIdlRpcResponse struct {
 // Client //
 ////////////
 
+type Serializer interface {
+	Marshal(in interface{}) ([]byte, error)
+	Unmarshal(in []byte, out interface{}) error
+}
+
+type JsonSerializer struct { 
+	ForceASCII    bool
+}
+
+func (s *JsonSerializer) Marshal(in interface{}) ([]byte, error) {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	
+	if s.ForceASCII {
+		buf, err := EncodeASCII(b)
+		if err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+	return b, nil
+}
+
+func (s *JsonSerializer) Unmarshal(in []byte, out interface{}) error {
+	return json.Unmarshal(in, out)
+}
+
 type Transport interface {
-	Call(method string, params ...interface{}) (interface{}, *JsonRpcError)
-	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
+	Send(in []byte) ([]byte, error)
 }
 
 type HttpTransport struct {
 	Url string
 }
 
-func (t *HttpTransport) post(jsonReq interface{}) []byte {
-	post, err := json.Marshal(jsonReq)
-	if err != nil {
-		panic(err)
-	}
+func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 
 	//fmt.Printf("request:\n%s\n", post)
 
-	req, err := http.NewRequest("POST", t.Url, bytes.NewBuffer(post))
+	req, err := http.NewRequest("POST", t.Url, bytes.NewBuffer(in))
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("barrister: HttpTransport NewRequest failed: %s", err)
+		return nil, errors.New(msg)
 	}
 
 	req.Header.Add("Content-Type", "application/json")
@@ -380,48 +490,85 @@ func (t *HttpTransport) post(jsonReq interface{}) []byte {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("barrister: HttpTransport POST to %s failed: %s", t.Url, err)
+		return nil, errors.New(msg)
 	}
 	defer resp.Body.Close()
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("barrister: HttpTransport Unable to read resp.Body: %s", err)
+		return nil, errors.New(msg)
 	}
 
 	//fmt.Printf("%s\n\n", body)
 
-	return body
+	return body, nil
 }
 
-func (t *HttpTransport) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
-	respBytes := t.post(batch)
+type Client interface {
+	Call(method string, params ...interface{}) (interface{}, *JsonRpcError)
+	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
+}
+
+type RemoteClient struct {
+	trans Transport
+	ser   Serializer
+}
+
+func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
+	reqBytes, err := c.ser.Marshal(batch)
+	if err != nil {
+		msg := fmt.Sprintf("barrister: CallBatch unable to Marshal request: %s", err)
+		return []JsonRpcResponse{
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32600, Message: msg} }}
+	}
+
+	respBytes, err := c.trans.Send(reqBytes)
+	if err != nil {
+		msg := fmt.Sprintf("barrister: CallBatch Transport error during request: %s", err)
+		return []JsonRpcResponse{
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg} }}
+	}
 
 	var batchResp []JsonRpcResponse
-	err := json.Unmarshal(respBytes, &batchResp)
+	err = c.ser.Unmarshal(respBytes, &batchResp)
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("barrister: CallBatch unable to Unmarshal response: %s", err)
+		return []JsonRpcResponse{
+			JsonRpcResponse{Error: &JsonRpcError{Code: -32603, Message: msg} }}
 	}
 
 	return batchResp
 }
 
-func (t *HttpTransport) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
-	jsonReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
+func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+	rpcReq := JsonRpcRequest{Jsonrpc: "2.0", Id: randStr(20), Method: method, Params: params}
 
-	respBytes := t.post(jsonReq)
-
-	jsonResp := JsonRpcResponse{}
-
-	err := json.Unmarshal(respBytes, &jsonResp)
+	reqBytes, err := c.ser.Marshal(rpcReq)
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("barrister: %s: Call unable to Marshal request: %s", method, err)
+		return nil, &JsonRpcError{Code: -32600, Message: msg}
 	}
 
-	if jsonResp.Error != nil {
-		return nil, jsonResp.Error
+	respBytes, err := c.trans.Send(reqBytes)
+	if err != nil {
+		msg := fmt.Sprintf("barrister: %s: Transport error during request: %s", method, err)
+		return nil, &JsonRpcError{Code: -32603, Message: msg}
 	}
 
-	return jsonResp.Result, nil
+	var rpcResp JsonRpcResponse
+	err = c.ser.Unmarshal(respBytes, &rpcResp)
+	if err != nil {
+		msg := fmt.Sprintf("barrister: %s: Call unable to Unmarshal response: %s", method, err)
+		return nil, &JsonRpcError{Code: -32603, Message: msg}
+	}
+
+	if rpcResp.Error != nil {
+		return nil, rpcResp.Error
+	}
+
+	return rpcResp.Result, nil
 }
 
 //////////////////////////////////////////////////
