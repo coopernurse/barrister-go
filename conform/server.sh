@@ -2,9 +2,8 @@
 
 set -e
 
-DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-go build -o $DIR/server $DIR/server.go
+go build -o $BARRISTER_GO/conform/server $BARRISTER_GO/conform/server.go
 
-$DIR/server $1 &
+$BARRISTER_GO/conform/server $1 &
 trap "kill -9 $!" TERM
 wait
