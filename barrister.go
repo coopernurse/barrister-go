@@ -2,32 +2,23 @@ package barrister
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"reflect"
 	"strings"
-	"time"
 )
 
 var zeroVal reflect.Value
 
-func RandStr(length int) string {
-	rand.Seed(time.Now().UnixNano())
-	b := bytes.Buffer{}
-	for i := 0; i < length; i++ {
-		x := rand.Int31n(36)
-		if x < 10 {
-			b.WriteString(string(48 + x))
-		} else {
-			b.WriteString(string(87 + x))
-		}
-	}
-	return b.String()
+func RandStr(bytes int) string {
+	buf := make([]byte, bytes)
+	io.ReadFull(rand.Reader, buf)
+	return fmt.Sprintf("%x", buf)
 }
 
 //////////////////////////////////////////////////
@@ -51,6 +42,14 @@ func ParseIdlJson(jsonData []byte) (*Idl, error) {
 	}
 
 	return NewIdl(elems), nil
+}
+
+func MustParseIdlJson(jsonData []byte) *Idl {
+	idl, err := ParseIdlJson(jsonData)
+	if err != nil {
+		panic(err)
+	}
+	return idl
 }
 
 func NewIdl(elems []IdlJsonElem) *Idl {
@@ -319,6 +318,24 @@ type BarristerIdlRpcResponse struct {
 	Result []IdlJsonElem `json:"result,omitempty"`
 }
 
+type ReturnVal struct {
+	result interface{}
+	err    error
+}
+
+func toJsonRpcError(method string, err error) *JsonRpcError {
+	if err == nil {
+		return nil
+	}
+
+	e, ok := err.(*JsonRpcError)
+	if ok {
+		return e
+	}
+	msg := fmt.Sprintf("barrister: method '%s' raised unknown error: %v", method, err)
+	return &JsonRpcError{Code: -32000, Message: msg}
+}
+
 //////////////////////////////////////////////////
 // Client //
 ////////////
@@ -434,7 +451,7 @@ func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 }
 
 type Client interface {
-	Call(method string, params ...interface{}) (interface{}, *JsonRpcError)
+	Call(method string, params ...interface{}) ReturnVal
 	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
 }
 
@@ -473,51 +490,109 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	return batchResp
 }
 
-func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+func (c *RemoteClient) Call(method string, params ...interface{}) ReturnVal {
 	rpcReq := JsonRpcRequest{Jsonrpc: "2.0", Id: RandStr(20), Method: method, Params: params}
 
 	reqBytes, err := c.ser.Marshal(rpcReq)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Call unable to Marshal request: %s", method, err)
-		return nil, &JsonRpcError{Code: -32600, Message: msg}
+		return ReturnVal{nil, &JsonRpcError{Code: -32600, Message: msg}}
 	}
 
 	respBytes, err := c.trans.Send(reqBytes)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Transport error during request: %s", method, err)
-		return nil, &JsonRpcError{Code: -32603, Message: msg}
+		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
 	}
 
 	var rpcResp JsonRpcResponse
 	err = c.ser.Unmarshal(respBytes, &rpcResp)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Call unable to Unmarshal response: %s", method, err)
-		return nil, &JsonRpcError{Code: -32603, Message: msg}
+		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
 	}
 
 	if rpcResp.Error != nil {
-		return nil, rpcResp.Error
+		return ReturnVal{nil, rpcResp.Error}
 	}
 
-	return rpcResp.Result, nil
+	return ReturnVal{rpcResp.Result, nil}
 }
 
 //////////////////////////////////////////////////
 // Server //
 ////////////
 
+// If a server handler implements Cloneable, it will
+// be cloned per JSON-RPC call.  Used in conjunction with
+// Filters, this allows you to initialize out of band context 
+// that your service implementation may need.  The most common
+// example is security information.  A Filter might check HTTP
+// headers and resolve the caller's identity and role and set that
+// as context on the cloned service implementation.
+//
+// Another use case is thread safety.  By implementing Cloneable
+// your services no longer need to be threadsafe, and can safely store
+// state locally for the lifetime of the service method invocation.
+//
+type Cloneable interface {
+	Clone() interface{}
+}
+
+// Filters allow you to intercept requests before and after the handler method
+// is invoked.  Filters are useful for implementing cross cutting concerns
+// such as authentication, performance measurement, logging, etc.
+type Filter interface {
+
+	// PreInvoke is called after the handler has been resolved, but prior
+	// to handler method invocation.  
+	//
+	// handler will be a pointer to the handler instance resolved for this 
+	// req.Method.  
+	//
+	// If PreInvoke returns a non-nil *JsonRpcResponse, the request is 
+	// considered completed, and the returned JsonRpcResponse will be used as the
+	// response.  No other PreInvoke() or PostInvoke() methods will be called and
+	// the handler method will not be called.
+	//
+	// If PreInvoke returns nil, request processing will continue normally.
+	//
+	PreInvoke(method string, params []interface{}, handler interface{}) *ReturnVal
+
+	// PostInvoke is called after the handler method has been invoked and
+	// returns a bool that indicates whether later filters should be called.
+	//
+	// Implementations may alter the ReturnVal, which will be later marshaled
+	// into the JSON-RPC response.
+	//
+	// If PostInvoke returns false, the filter chain terminates.
+	// If PostInvoke returns true, other filters in the chain will be 
+	// invoked (if available).
+	PostInvoke(method string, params []interface{}, retval *ReturnVal) bool
+}
+
 func NewJSONServer(idl *Idl, forceASCII bool) Server {
 	return NewServer(idl, &JsonSerializer{forceASCII})
 }
 
 func NewServer(idl *Idl, ser Serializer) Server {
-	return Server{idl, ser, map[string]interface{}{}}
+	return Server{idl, ser, map[string]interface{}{}, make([]Filter, 0)}
 }
 
 type Server struct {
 	idl      *Idl
 	ser      Serializer
 	handlers map[string]interface{}
+	filters  []Filter
+}
+
+// AddFilter registers a Filter implementation with the Server. 
+// 
+// * Filter.PreInvoke is called in the order of registration
+// * Filter.PostInvoke is called in reverse order of registration
+//
+func (s *Server) AddFilter(f Filter) {
+	s.filters = append(s.filters, f)
 }
 
 func (s *Server) AddHandler(iface string, impl interface{}) {
@@ -528,7 +603,7 @@ func (s *Server) AddHandler(iface string, impl interface{}) {
 		panic(msg)
 	}
 
-	rpcErrKind := reflect.TypeOf(JsonRpcError{}).Kind()
+	var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 	elem := reflect.ValueOf(impl)
 	for _, idlFunc := range ifaceFuncs {
@@ -560,8 +635,8 @@ func (s *Server) AddHandler(iface string, impl interface{}) {
 		s.validate(idlFunc.Returns, fnType.Out(0), path)
 
 		errType := fnType.Out(1)
-		if errType.Kind() != reflect.Ptr || errType.Elem().Kind() != rpcErrKind {
-			msg := fmt.Sprintf("%s.%s return value[1] has invalid type: %s (expected: *barrister.JsonRpcError)", iface, fname, errType)
+		if !errType.Implements(typeOfError) {
+			msg := fmt.Sprintf("%s.%s return value[1] has invalid type: %s (expected: error)", iface, fname, errType)
 			panic(msg)
 		}
 	}
@@ -621,40 +696,38 @@ func (s *Server) InvokeBytes(req []byte) []byte {
 }
 
 func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
-	var rpcerr *JsonRpcError
-
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
 		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.elems}
-	} else {
-		// handle normal RPC method executions
-		var result interface{}
-		arr, ok := rpcReq.Params.([]interface{})
-		if ok {
-			result, rpcerr = s.Call(rpcReq.Method, arr...)
-		} else {
-			result, rpcerr = s.Call(rpcReq.Method)
-		}
-		if rpcerr == nil {
-			// successful Call
-			return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: result}
-		}
 	}
 
-	// RPC error occurred
-	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: rpcerr}
+	// handle normal RPC method executions
+	var retval ReturnVal
+	arr, ok := rpcReq.Params.([]interface{})
+	if ok {
+		retval = s.Call(rpcReq.Method, arr...)
+	} else {
+		retval = s.Call(rpcReq.Method)
+	}
+
+	if retval.err == nil {
+		// successful Call
+		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: retval.result}
+	}
+
+	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: toJsonRpcError(rpcReq.Method, retval.err)}
 }
 
 func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	batchResp := make([]JsonRpcResponse, len(batch))
 
 	for _, req := range batch {
-		result, err := s.Call(req.Method, req.Params)
+		retval := s.Call(req.Method, req.Params)
 		resp := JsonRpcResponse{Jsonrpc: "2.0", Id: req.Id}
-		if err == nil {
-			resp.Result = result
+		if retval.err == nil {
+			resp.Result = retval.result
 		} else {
-			resp.Error = err
+			resp.Error = toJsonRpcError(req.Method, retval.err)
 		}
 		batchResp = append(batchResp, resp)
 	}
@@ -662,24 +735,32 @@ func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	return batchResp
 }
 
-func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonRpcError) {
+func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 
 	idlFunc, ok := s.idl.methods[method]
 	if !ok {
-		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}
+		return ReturnVal{nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}}
 	}
 
 	iface, fname := parseMethod(method)
 
 	handler, ok := s.handlers[iface]
 	if !ok {
-		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("No handler registered for interface: %s", iface)}
+		return ReturnVal{nil, &JsonRpcError{Code: -32601,
+			Message: fmt.Sprintf("No handler registered for interface: %s", iface)}}
+	}
+
+	// If handler supports cloning, create a new instance for this request
+	c, ok := handler.(Cloneable)
+	if ok {
+		handler = c.Clone()
 	}
 
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
 	if fn == zeroVal {
-		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
+		return ReturnVal{nil, &JsonRpcError{Code: -32601,
+			Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}}
 	}
 
 	//fmt.Printf("Call method: %s  params: %v\n", method, params)
@@ -687,11 +768,22 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 	// check params
 	fnType := fn.Type()
 	if fnType.NumIn() != len(params) {
-		return nil, &JsonRpcError{Code: -32602, Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}
+		return ReturnVal{nil, &JsonRpcError{Code: -32602,
+			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}}
 	}
 
 	if len(idlFunc.Params) != len(params) {
-		return nil, &JsonRpcError{Code: -32602, Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, len(idlFunc.Params), len(params))}
+		return ReturnVal{nil, &JsonRpcError{Code: -32602,
+			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, len(idlFunc.Params), len(params))}}
+	}
+
+	// run filters - PreInvoke
+	flen := len(s.filters)
+	for i := 0; i < flen; i++ {
+		r := s.filters[i].PreInvoke(method, params, &handler)
+		if r != nil {
+			return *r
+		}
 	}
 
 	// convert params
@@ -703,7 +795,7 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 		paramConv := newConvert(s.idl, &idlField, desiredType, param, path)
 		converted, err := paramConv.run()
 		if err != nil {
-			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
+			return ReturnVal{nil, &JsonRpcError{Code: -32602, Message: err.Error()}}
 		}
 		paramVals = append(paramVals, converted)
 	}
@@ -711,21 +803,31 @@ func (s *Server) Call(method string, params ...interface{}) (interface{}, *JsonR
 	// make the call
 	ret := fn.Call(paramVals)
 	if len(ret) != 2 {
-		return nil, &JsonRpcError{Code: -32603, Message: fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))}
+		msg := fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))
+		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
 	}
 
 	ret0 := ret[0].Interface()
 	ret1 := ret[1].Interface()
 
+	retval := ReturnVal{}
+	retval.result = ret0
 	if ret1 != nil {
-		rpcErr, ok := ret1.(*JsonRpcError)
-		if !ok {
-			return nil, &JsonRpcError{Code: -32603, Message: fmt.Sprintf("Method %s did not return JsonRpcError for last return val: %v", method, ret1)}
+		e, ok := ret1.(error)
+		if ok {
+			retval.err = e
 		}
-		return ret0, rpcErr
 	}
 
-	return ret0, nil
+	// run filters - PostInvoke
+	for i := flen - 1; i >= 0; i-- {
+		ok := s.filters[i].PostInvoke(method, params, &retval)
+		if !ok {
+			break
+		}
+	}
+
+	return retval
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {

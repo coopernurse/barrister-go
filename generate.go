@@ -2,6 +2,7 @@ package barrister
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -39,6 +40,11 @@ func (g *generateGo) generate() []byte {
 	line(b, 1, `"github.com/coopernurse/barrister-go"`)
 	line(b, 0, ")\n")
 
+	line(b, 0, "const BarristerVersion string = \""+g.idl.Meta.BarristerVersion+"\"")
+	line(b, 0, "const BarristerChecksum string = \""+g.idl.Meta.Checksum+"\"")
+	line(b, 0, fmt.Sprintf("const BarristerDateGenerated int64 = %d", g.idl.Meta.DateGenerated))
+	line(b, 0, "")
+
 	for name, _ := range g.idl.enums {
 		g.generateEnum(b, name)
 	}
@@ -62,7 +68,19 @@ func (g *generateGo) generate() []byte {
 
 	g.generateNewServer(b)
 
+	g.generateIdlJson(b)
+
 	return b.Bytes()
+}
+
+func (g *generateGo) generateIdlJson(b *bytes.Buffer) {
+	idlbytes, err := json.MarshalIndent(g.idl.elems, "", "    ")
+	if err != nil {
+		panic(err)
+	}
+	idlstr := strings.Replace(string(idlbytes), "`", "`+\"`\"+`", -1)
+	line(b, 0, "")
+	line(b, 0, "const IdlJsonRaw = `"+idlstr+"`")
 }
 
 func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
@@ -142,7 +160,7 @@ func (g *generateGo) generateInterface(b *bytes.Buffer, ifaceName string) {
 			}
 			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.optionalToPtr))
 		}
-		line(b, 1, fmt.Sprintf("%s(%s) (%s, *barrister.JsonRpcError)",
+		line(b, 1, fmt.Sprintf("%s(%s) (%s, error)",
 			goName, params, fn.Returns.goType(g.optionalToPtr)))
 	}
 }
@@ -173,7 +191,7 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 			paramIdents += ", "
 			paramIdents += ident
 		}
-		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, *barrister.JsonRpcError) {",
+		line(b, 0, fmt.Sprintf("func (_p %s) %s(%s) (%s, error) {",
 			goName, fnName, params, retType))
 		line(b, 1, fmt.Sprintf("_res, _err := _p.client.Call(\"%s\"%s)",
 			method, paramIdents))

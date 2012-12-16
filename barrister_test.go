@@ -230,3 +230,9 @@ func BenchmarkConvertStruct(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkRandStr(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		RandStr(16)
+	}
+}

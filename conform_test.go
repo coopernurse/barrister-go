@@ -56,11 +56,11 @@ type Person struct {
 // implementation of "A" interface from conform.idl
 type AImpl struct{}
 
-func (i AImpl) Add(a int64, b int64) (int64, *JsonRpcError) {
+func (i AImpl) Add(a int64, b int64) (int64, error) {
 	return a + b, nil
 }
 
-func (i AImpl) Calc(nums []float64, operation MathOp) (float64, *JsonRpcError) {
+func (i AImpl) Calc(nums []float64, operation MathOp) (float64, error) {
 	switch operation {
 	case MathOpAdd:
 		sum := float64(0)
@@ -80,31 +80,31 @@ func (i AImpl) Calc(nums []float64, operation MathOp) (float64, *JsonRpcError) {
 	return 0, &JsonRpcError{Code: -32000, Message: msg}
 }
 
-func (i AImpl) Sqrt(a float64) (float64, *JsonRpcError) {
+func (i AImpl) Sqrt(a float64) (float64, error) {
 	return math.Sqrt(a), nil
 }
 
-func (i AImpl) Repeat(req1 RepeatRequest) (RepeatResponse, *JsonRpcError) {
+func (i AImpl) Repeat(req1 RepeatRequest) (RepeatResponse, error) {
 	return RepeatResponse{}, nil
 }
 
-func (i AImpl) Say_hi() (HiResponse, *JsonRpcError) {
+func (i AImpl) Say_hi() (HiResponse, error) {
 	return HiResponse{"hi"}, nil
 }
 
-func (i AImpl) Repeat_num(num int64, count int64) ([]int64, *JsonRpcError) {
+func (i AImpl) Repeat_num(num int64, count int64) ([]int64, error) {
 	arr := []int64{}
 	return arr, nil
 }
 
-func (i AImpl) PutPerson(p Person) (string, *JsonRpcError) {
+func (i AImpl) PutPerson(p Person) (string, error) {
 	return p.PersonId, nil
 }
 
 type BImpl struct{}
 
 // implementation of "B" interface from conform.idl
-func (i BImpl) Echo(s string) (*string, *JsonRpcError) {
+func (i BImpl) Echo(s string) (*string, error) {
 	if s == "return-null" {
 		return nil, nil
 	}
@@ -115,14 +115,14 @@ type BImpl_MissingFunc struct{}
 
 type BImpl_BadParam struct{}
 
-func (b BImpl_BadParam) Echo(f float64) (*string, *JsonRpcError) {
+func (b BImpl_BadParam) Echo(f float64) (*string, error) {
 	s := "blah"
 	return &s, nil
 }
 
 type BImpl_BadReturn struct{}
 
-func (b BImpl_BadReturn) Echo(s string) (int, *JsonRpcError) {
+func (b BImpl_BadReturn) Echo(s string) (int, error) {
 	return 10, nil
 }
 
@@ -195,7 +195,10 @@ func TestServerCallSuccess(t *testing.T) {
 	}
 
 	for x, generic := range genericCalls {
-		res, err := svr.Call(generic.method, generic.params...)
+		retval := svr.Call(generic.method, generic.params...)
+		res := retval.result
+		err := toJsonRpcError(generic.method, retval.err)
+
 		if err == nil {
 			if generic.errcode == 0 {
 				if !reflect.DeepEqual(generic.result, res) {
@@ -220,16 +223,16 @@ func TestServerCallSuccess(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		res, err := svr.Call("B.echo", call.in)
-		if err != nil {
-			panic(err)
+		retval := svr.Call("B.echo", call.in)
+		if retval.err != nil {
+			t.Fatalf("B.echo retval.err !=nil - result=%v err=%v", retval.result, retval.err)
 		}
 
-		resStr, ok := res.(*string)
+		resStr, ok := retval.result.(*string)
 		if !ok {
 			s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v",
-				reflect.TypeOf(res).Name())
-			panic(s)
+				reflect.TypeOf(retval.result).Name())
+			t.Fatal(s)
 		}
 
 		if !((resStr == nil && call.out == nil) || (*resStr == call.out)) {
@@ -252,7 +255,9 @@ func TestServerCallFail(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		res, err := svr.Call(call.method)
+		retval := svr.Call(call.method)
+		res := retval.result
+		err := retval.err.(*JsonRpcError)
 		if res != nil {
 			t.Errorf("%v != nil on expected fail call: %s", res, call.method)
 		} else if err == nil {
@@ -280,14 +285,14 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 		req := JsonRpcRequest{Id: "123", Method: "B.echo", Params: []interface{}{call.in}}
 		reqBytes, err := json.Marshal(req)
 		if err != nil {
-			panic(err)
+			t.Fatal(err)
 		}
 
 		resBytes := svr.InvokeBytes(reqBytes)
 		resp := JsonRpcResponse{}
 		err = json.Unmarshal(resBytes, &resp)
 		if err != nil {
-			panic(err)
+			t.Fatal(err)
 		}
 
 		if resp.Error != nil {
