@@ -780,7 +780,7 @@ func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 	// run filters - PreInvoke
 	flen := len(s.filters)
 	for i := 0; i < flen; i++ {
-		r := s.filters[i].PreInvoke(method, params, &handler)
+		r := s.filters[i].PreInvoke(method, params, handler)
 		if r != nil {
 			return *r
 		}

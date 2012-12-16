@@ -54,7 +54,9 @@ type Person struct {
 }
 
 // implementation of "A" interface from conform.idl
-type AImpl struct{}
+type AImpl struct {
+	cloned bool
+}
 
 func (i AImpl) Add(a int64, b int64) (int64, error) {
 	return a + b, nil
@@ -101,13 +103,36 @@ func (i AImpl) PutPerson(p Person) (string, error) {
 	return p.PersonId, nil
 }
 
-type BImpl struct{}
+type Context struct {
+	UserId int
+}
+
+type BImpl struct {
+	// used to prove Clone() called
+	cloned bool
+
+	// use to prove we can modify non-reference slots on handlers from filters
+	context *Context
+
+	// used to prove filter order - reset per clone
+	log []string
+}
+
+// BImpl is Cloneable
+func (i BImpl) Clone() interface{} {
+	return BImpl{true, &Context{}, make([]string, 0)}
+}
 
 // implementation of "B" interface from conform.idl
 func (i BImpl) Echo(s string) (*string, error) {
-	if s == "return-null" {
+	switch s {
+	case "return-null":
 		return nil, nil
+	case "get-userid":
+		tmp := fmt.Sprintf("%d", i.context.UserId)
+		return &tmp, nil
 	}
+	// default
 	return &s, nil
 }
 
@@ -450,4 +475,115 @@ func TestServerBarristerIdl(t *testing.T) {
 	//fmt.Printf("%v\n", rpcResp.Result)
 
 	DeepEquals(t, idl.elems, rpcResp.Result)
+}
+
+type ProxyFilter struct {
+	pre  func(method string, params []interface{}, handler interface{}) *ReturnVal
+	post func(method string, params []interface{}, retval *ReturnVal) bool
+}
+
+func (f ProxyFilter) PreInvoke(method string, params []interface{}, handler interface{}) *ReturnVal {
+	return f.pre(method, params, handler)
+}
+
+func (f ProxyFilter) PostInvoke(method string, params []interface{}, retval *ReturnVal) bool {
+	return f.post(method, params, retval)
+}
+
+func TestFilterOrder(t *testing.T) {
+	idl := parseTestIdl()
+	svr := NewJSONServer(idl, true)
+
+	aimpl := AImpl{}
+	bimpl := BImpl{}
+	svr.AddHandler("A", aimpl)
+	svr.AddHandler("B", bimpl)
+
+	filterLog := make([]string, 0)
+
+	aClone := false
+	bClone := false
+
+	createPre := func(id int) func(method string, params []interface{}, handler interface{}) *ReturnVal {
+		return func(method string, params []interface{}, handler interface{}) *ReturnVal {
+			filterLog = append(filterLog, fmt.Sprintf("%d: pre: %s", id, method))
+			switch t := handler.(type) {
+			case AImpl:
+				aClone = t.cloned
+			case BImpl:
+				bClone = t.cloned
+			default:
+				fmt.Println("Unknown type:", reflect.TypeOf(handler))
+			}
+			return nil
+		}
+	}
+	createPost := func(id int) func(method string, params []interface{}, retval *ReturnVal) bool {
+		return func(method string, params []interface{}, retval *ReturnVal) bool {
+			filterLog = append(filterLog, fmt.Sprintf("%d: post: %s", id, method))
+			return true
+		}
+	}
+
+	// add filter twice with different IDs
+	svr.AddFilter(ProxyFilter{createPre(1), createPost(1)})
+	svr.AddFilter(ProxyFilter{createPre(2), createPost(2)})
+
+	resultOk(svr.Call("A.add", 1, 2))
+	resultOk(svr.Call("B.echo", "foo"))
+	resultOk(svr.Call("B.echo", "foo"))
+
+	// assert that PreInvoke is called in order, PostInvoke is called in reverse order
+	expectedLog := []string{"1: pre: A.add", "2: pre: A.add", "2: post: A.add", "1: post: A.add",
+		"1: pre: B.echo", "2: pre: B.echo", "2: post: B.echo", "1: post: B.echo",
+		"1: pre: B.echo", "2: pre: B.echo", "2: post: B.echo", "1: post: B.echo"}
+	if !reflect.DeepEqual(filterLog, expectedLog) {
+		t.Errorf("log!=expected: %v != %v", filterLog, expectedLog)
+	}
+
+	// AImpl should not have been cloned
+	if aClone {
+		t.Errorf("aClone!=false: %v", aClone)
+	}
+
+	// BImpl should have been cloned
+	if !bClone {
+		t.Errorf("bClone!=true: %v", bClone)
+	}
+}
+
+func resultOk(v ReturnVal) ReturnVal {
+	if v.err != nil {
+		panic(v.err)
+	}
+	return v
+}
+
+func TestCloneModifiesHandler(t *testing.T) {
+	idl := parseTestIdl()
+	svr := NewJSONServer(idl, true)
+	bimpl := BImpl{context: &Context{}}
+	svr.AddHandler("B", bimpl)
+
+	pre := func(method string, params []interface{}, handler interface{}) *ReturnVal {
+		switch t := handler.(type) {
+		case BImpl:
+			t.context.UserId = 100
+		default:
+			fmt.Println("unknown type:", reflect.TypeOf(handler))
+		}
+		return nil
+	}
+
+	post := func(method string, params []interface{}, retval *ReturnVal) bool {
+		return true
+	}
+
+	svr.AddFilter(ProxyFilter{pre, post})
+
+	r := resultOk(svr.Call("B.echo", "get-userid"))
+	s, ok := r.result.(*string)
+	if !ok || *s != "100" {
+		t.Errorf("get-userid != 100: %v", *s)
+	}
 }
