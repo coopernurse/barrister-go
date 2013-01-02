@@ -18,6 +18,16 @@ func (e *TypeError) Error() string {
 	return fmt.Sprintf("barrister: %s: %s", e.path, e.msg)
 }
 
+func Convert(idl *Idl, field *Field, desired reflect.Type, actual interface{}, path string) (interface{}, error) {
+	c := newConvert(idl, field, desired, actual, path)
+	conv, err := c.run()
+	if err != nil {
+		return nil, err
+	}
+
+	return conv.Interface(), nil
+}
+
 type convert struct {
 	idl       *Idl
 	field     *Field

@@ -171,9 +171,14 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 		panic("No interface found: " + ifaceName)
 	}
 
-	goName := capitalize(ifaceName) + "Proxy"
+	goIfaceName := capitalize(ifaceName)
+	goName := goIfaceName + "Proxy"
+
+	line(b, 0, fmt.Sprintf("func New%s(c barrister.Client) %s { return %s{c, barrister.MustParseIdlJson([]byte(IdlJsonRaw))} }\n", goName, goIfaceName, goName))
+
 	line(b, 0, fmt.Sprintf("type %s struct {", goName))
 	line(b, 1, "client barrister.Client")
+	line(b, 1, "idl    *barrister.Idl")
 	line(b, 0, "}\n")
 	for _, fn := range funcs {
 		method := fmt.Sprintf("%s.%s", ifaceName, fn.Name)
@@ -201,6 +206,10 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 			line(b, 3, "return nil, nil")
 			line(b, 2, "}")
 		}
+		line(b, 2, fmt.Sprintf("_retType := _p.idl.Method(\"%s\").Returns", method))
+		line(b, 2, fmt.Sprintf("_res, _err = barrister.Convert(_p.idl, &_retType, reflect.TypeOf(%s), _res, \"\")", zeroVal))
+		line(b, 1, "}")
+		line(b, 1, "if _err == nil {")
 		line(b, 2, fmt.Sprintf("_cast, _ok := _res.(%s)", retType))
 		line(b, 2, "if !_ok {")
 		line(b, 3, "_t := reflect.TypeOf(_res)")

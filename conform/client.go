@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
-	"io"
-	"strings"
-	"encoding/json"
 	"github.com/coopernurse/barrister-go"
+	"io"
+	"os"
+	"strings"
 )
 
 type RpcCaller interface {
@@ -25,15 +25,15 @@ type Batch struct {
 
 func (b *Batch) Call(client barrister.Client) []string {
 	batch := []barrister.JsonRpcRequest{}
-	for _, line := range(b.lines) {
+	for _, line := range b.lines {
 		batch = append(batch, barrister.JsonRpcRequest{Id: line.rpcid, Method: line.Method(), Params: line.Params()})
 	}
 
 	var result []string
 
 	batchResp := client.CallBatch(batch)
-	for _, resp := range(batchResp) {
-		for _, line := range(b.lines) {
+	for _, resp := range batchResp {
+		for _, line := range b.lines {
 			if resp.Id == line.rpcid {
 				line.HandleResponse(resp.Result, resp.Error)
 				result = append(result, line.String())
@@ -72,17 +72,20 @@ func (line *ConformLine) Params() []interface{} {
 	return params
 }
 
-func (line *ConformLine) HandleResponse(result interface{}, rpcerr *barrister.JsonRpcError) {
-	if rpcerr != nil {
+func (line *ConformLine) HandleResponse(result interface{}, err error) {
+	if err != nil {
+		rpcerr := err.(*barrister.JsonRpcError)
 		line.act_status = "rpcerr"
 		line.act_result = fmt.Sprintf("%d", rpcerr.Code)
 	} else {
 		line.act_status = "ok"
 
-		body, err := json.Marshal(result); if err != nil {
+		body, err := json.Marshal(result)
+		if err != nil {
 			panic(err)
 		}
-		b, err := barrister.EncodeASCII(body); if err != nil {
+		b, err := barrister.EncodeASCII(body)
+		if err != nil {
 			panic(err)
 		}
 		line.act_result = b.String()
@@ -92,9 +95,9 @@ func (line *ConformLine) HandleResponse(result interface{}, rpcerr *barrister.Js
 func (line *ConformLine) Call(client barrister.Client) []string {
 
 	params := line.Params()
-	res, rpcerr := client.Call(line.Method(), params...)
-	line.HandleResponse(res, rpcerr)
-	
+	res, err := client.Call(line.Method(), params...)
+	line.HandleResponse(res, err)
+
 	return []string{line.String()}
 }
 
@@ -160,15 +163,17 @@ func main() {
 		panic(err)
 	}
 
-	client := barrister.NewHTTPClient("http://localhost:9233", true)
+	client := barrister.NewRemoteClient(&barrister.HttpTransport{Url: "http://localhost:9233"}, true)
 
 	fo, err := os.Create(outfile)
-    if err != nil { panic(err) }
-    defer fo.Close()
-    w := bufio.NewWriter(fo)
+	if err != nil {
+		panic(err)
+	}
+	defer fo.Close()
+	w := bufio.NewWriter(fo)
 
 	for _, c := range parsed.calls {
-		for _, line := range(c.Call(client)) {
+		for _, line := range c.Call(client) {
 			w.WriteString(fmt.Sprintf("%s\n", line))
 		}
 	}

@@ -284,6 +284,10 @@ func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
 	return g.generate()
 }
 
+func (idl *Idl) Method(name string) Function {
+	return idl.methods[name]
+}
+
 //////////////////////////////////////////////////
 // Request / Response //
 ////////////////////////
@@ -318,9 +322,39 @@ type BarristerIdlRpcResponse struct {
 	Result []IdlJsonElem `json:"result,omitempty"`
 }
 
-type ReturnVal struct {
-	result interface{}
-	err    error
+// RequestResponse holds the request method and params and the
+// handler instance that the method resolves to.
+//
+// This struct is used with the Filter interface and allows
+// Filter implementations to inspect the request, mutate the
+// handler (e.g. set out of band authentication information),
+// and set the result/error (e.g. to terminate an unauthorized request)
+type RequestResponse struct {
+	// from Transport
+	Headers map[string][]string
+
+	// from JsonRpcRequest
+	Method string
+	Params []interface{}
+
+	// handler instance that will process
+	// this request method - this is passed
+	// by value, so pointer fields in the handler
+	// may be modified by filters
+	Handler interface{}
+
+	// to JsonRpcResponse
+	Result interface{}
+	Err    error
+}
+
+func (rr RequestResponse) GetHeader(key string) string {
+	xs, ok := rr.Headers[key]
+	if ok && len(xs) > 0 {
+		return xs[0]
+	}
+
+	return ""
 }
 
 func toJsonRpcError(method string, err error) *JsonRpcError {
@@ -415,8 +449,15 @@ type Transport interface {
 	Send(in []byte) ([]byte, error)
 }
 
+type HttpClientVisitor interface {
+	BeforeRequest(req *http.Request)
+	AfterRequest(req *http.Request, resp *http.Response)
+}
+
 type HttpTransport struct {
-	Url string
+	Url     string
+	Visitor HttpClientVisitor
+	Jar     http.CookieJar
 }
 
 func (t *HttpTransport) Send(in []byte) ([]byte, error) {
@@ -431,7 +472,14 @@ func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 
 	req.Header.Add("Content-Type", "application/json")
 
+	if t.Visitor != nil {
+		t.Visitor.BeforeRequest(req)
+	}
+
 	client := &http.Client{}
+	if t.Jar != nil {
+		client.Jar = t.Jar
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: HttpTransport POST to %s failed: %s", t.Url, err)
@@ -445,34 +493,38 @@ func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 		return nil, errors.New(msg)
 	}
 
+	if t.Visitor != nil {
+		t.Visitor.AfterRequest(req, resp)
+	}
+
 	//fmt.Printf("%s\n\n", body)
 
 	return body, nil
 }
 
 type Client interface {
-	Call(method string, params ...interface{}) ReturnVal
+	Call(method string, params ...interface{}) (interface{}, error)
 	CallBatch(batch []JsonRpcRequest) []JsonRpcResponse
 }
 
-func NewHTTPClient(url string, forceASCII bool) Client {
-	return &RemoteClient{&HttpTransport{url}, &JsonSerializer{forceASCII}}
+func NewRemoteClient(trans Transport, forceASCII bool) Client {
+	return &RemoteClient{trans, &JsonSerializer{forceASCII}}
 }
 
 type RemoteClient struct {
-	trans Transport
-	ser   Serializer
+	Trans Transport
+	Ser   Serializer
 }
 
 func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
-	reqBytes, err := c.ser.Marshal(batch)
+	reqBytes, err := c.Ser.Marshal(batch)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch unable to Marshal request: %s", err)
 		return []JsonRpcResponse{
 			JsonRpcResponse{Error: &JsonRpcError{Code: -32600, Message: msg}}}
 	}
 
-	respBytes, err := c.trans.Send(reqBytes)
+	respBytes, err := c.Trans.Send(reqBytes)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch Transport error during request: %s", err)
 		return []JsonRpcResponse{
@@ -480,7 +532,7 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	}
 
 	var batchResp []JsonRpcResponse
-	err = c.ser.Unmarshal(respBytes, &batchResp)
+	err = c.Ser.Unmarshal(respBytes, &batchResp)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: CallBatch unable to Unmarshal response: %s", err)
 		return []JsonRpcResponse{
@@ -490,33 +542,33 @@ func (c *RemoteClient) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	return batchResp
 }
 
-func (c *RemoteClient) Call(method string, params ...interface{}) ReturnVal {
+func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, error) {
 	rpcReq := JsonRpcRequest{Jsonrpc: "2.0", Id: RandStr(20), Method: method, Params: params}
 
-	reqBytes, err := c.ser.Marshal(rpcReq)
+	reqBytes, err := c.Ser.Marshal(rpcReq)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Call unable to Marshal request: %s", method, err)
-		return ReturnVal{nil, &JsonRpcError{Code: -32600, Message: msg}}
+		return nil, &JsonRpcError{Code: -32600, Message: msg}
 	}
 
-	respBytes, err := c.trans.Send(reqBytes)
+	respBytes, err := c.Trans.Send(reqBytes)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Transport error during request: %s", method, err)
-		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
+		return nil, &JsonRpcError{Code: -32603, Message: msg}
 	}
 
 	var rpcResp JsonRpcResponse
-	err = c.ser.Unmarshal(respBytes, &rpcResp)
+	err = c.Ser.Unmarshal(respBytes, &rpcResp)
 	if err != nil {
 		msg := fmt.Sprintf("barrister: %s: Call unable to Unmarshal response: %s", method, err)
-		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
+		return nil, &JsonRpcError{Code: -32603, Message: msg}
 	}
 
 	if rpcResp.Error != nil {
-		return ReturnVal{nil, rpcResp.Error}
+		return nil, rpcResp.Error
 	}
 
-	return ReturnVal{rpcResp.Result, nil}
+	return rpcResp.Result, nil
 }
 
 //////////////////////////////////////////////////
@@ -547,17 +599,11 @@ type Filter interface {
 	// PreInvoke is called after the handler has been resolved, but prior
 	// to handler method invocation.  
 	//
-	// handler will be a pointer to the handler instance resolved for this 
-	// req.Method.  
+	// Return value of false terminates the filter chain, and r.result, r.err
+	// will be used as the response.  
+	// Return value of true continues filter chain execution.
 	//
-	// If PreInvoke returns a non-nil *JsonRpcResponse, the request is 
-	// considered completed, and the returned JsonRpcResponse will be used as the
-	// response.  No other PreInvoke() or PostInvoke() methods will be called and
-	// the handler method will not be called.
-	//
-	// If PreInvoke returns nil, request processing will continue normally.
-	//
-	PreInvoke(method string, params []interface{}, handler interface{}) *ReturnVal
+	PreInvoke(r *RequestResponse) bool
 
 	// PostInvoke is called after the handler method has been invoked and
 	// returns a bool that indicates whether later filters should be called.
@@ -565,10 +611,10 @@ type Filter interface {
 	// Implementations may alter the ReturnVal, which will be later marshaled
 	// into the JSON-RPC response.
 	//
-	// If PostInvoke returns false, the filter chain terminates.
-	// If PostInvoke returns true, other filters in the chain will be 
-	// invoked (if available).
-	PostInvoke(method string, params []interface{}, retval *ReturnVal) bool
+	// Return value of false terminates the filter chain, and r.result, r.err
+	// will be used.  Return value of true continues filter chain execution.
+	//
+	PostInvoke(r *RequestResponse) bool
 }
 
 func NewJSONServer(idl *Idl, forceASCII bool) Server {
@@ -654,11 +700,12 @@ func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
 	}
 }
 
-func (s *Server) InvokeBytes(req []byte) []byte {
+func (s *Server) InvokeBytes(headers map[string][]string, req []byte) []byte {
 
 	// determine if batch or single
 	batch := s.ser.IsBatch(req)
 
+	// batch execution
 	if batch {
 		var batchReq []JsonRpcRequest
 		batchResp := []JsonRpcResponse{}
@@ -668,7 +715,7 @@ func (s *Server) InvokeBytes(req []byte) []byte {
 		}
 
 		for _, req := range batchReq {
-			resp := s.InvokeOne(&req)
+			resp := s.InvokeOne(headers, &req)
 			batchResp = append(batchResp, *resp)
 		}
 
@@ -679,14 +726,14 @@ func (s *Server) InvokeBytes(req []byte) []byte {
 		return b
 	}
 
-	//  - parse json into JsonRpcRequest
+	// single request execution
 	rpcReq := JsonRpcRequest{}
 	err := s.ser.Unmarshal(req, &rpcReq)
 	if err != nil {
 		return jsonParseErr("", false, err)
 	}
 
-	resp := s.InvokeOne(&rpcReq)
+	resp := s.InvokeOne(headers, &rpcReq)
 
 	b, err := s.ser.Marshal(resp)
 	if err != nil {
@@ -695,39 +742,40 @@ func (s *Server) InvokeBytes(req []byte) []byte {
 	return b
 }
 
-func (s *Server) InvokeOne(rpcReq *JsonRpcRequest) *JsonRpcResponse {
+func (s *Server) InvokeOne(headers map[string][]string, rpcReq *JsonRpcRequest) *JsonRpcResponse {
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
 		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.elems}
 	}
 
 	// handle normal RPC method executions
-	var retval ReturnVal
+	var result interface{}
+	var err error
 	arr, ok := rpcReq.Params.([]interface{})
 	if ok {
-		retval = s.Call(rpcReq.Method, arr...)
+		result, err = s.Call(headers, rpcReq.Method, arr...)
 	} else {
-		retval = s.Call(rpcReq.Method)
+		result, err = s.Call(headers, rpcReq.Method)
 	}
 
-	if retval.err == nil {
+	if err == nil {
 		// successful Call
-		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: retval.result}
+		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: result}
 	}
 
-	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: toJsonRpcError(rpcReq.Method, retval.err)}
+	return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Error: toJsonRpcError(rpcReq.Method, err)}
 }
 
-func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
+func (s *Server) CallBatch(headers map[string][]string, batch []JsonRpcRequest) []JsonRpcResponse {
 	batchResp := make([]JsonRpcResponse, len(batch))
 
 	for _, req := range batch {
-		retval := s.Call(req.Method, req.Params)
+		result, err := s.Call(headers, req.Method, req.Params)
 		resp := JsonRpcResponse{Jsonrpc: "2.0", Id: req.Id}
-		if retval.err == nil {
-			resp.Result = retval.result
+		if err == nil {
+			resp.Result = result
 		} else {
-			resp.Error = toJsonRpcError(req.Method, retval.err)
+			resp.Error = toJsonRpcError(req.Method, err)
 		}
 		batchResp = append(batchResp, resp)
 	}
@@ -735,19 +783,19 @@ func (s *Server) CallBatch(batch []JsonRpcRequest) []JsonRpcResponse {
 	return batchResp
 }
 
-func (s *Server) Call(method string, params ...interface{}) ReturnVal {
+func (s *Server) Call(headers map[string][]string, method string, params ...interface{}) (interface{}, error) {
 
 	idlFunc, ok := s.idl.methods[method]
 	if !ok {
-		return ReturnVal{nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}}
+		return nil, &JsonRpcError{Code: -32601, Message: fmt.Sprintf("Unsupported method: %s", method)}
 	}
 
 	iface, fname := parseMethod(method)
 
 	handler, ok := s.handlers[iface]
 	if !ok {
-		return ReturnVal{nil, &JsonRpcError{Code: -32601,
-			Message: fmt.Sprintf("No handler registered for interface: %s", iface)}}
+		return nil, &JsonRpcError{Code: -32601,
+			Message: fmt.Sprintf("No handler registered for interface: %s", iface)}
 	}
 
 	// If handler supports cloning, create a new instance for this request
@@ -759,8 +807,8 @@ func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 	elem := reflect.ValueOf(handler)
 	fn := elem.MethodByName(fname)
 	if fn == zeroVal {
-		return ReturnVal{nil, &JsonRpcError{Code: -32601,
-			Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}}
+		return nil, &JsonRpcError{Code: -32601,
+			Message: fmt.Sprintf("Function %s not found on handler %s", fname, iface)}
 	}
 
 	//fmt.Printf("Call method: %s  params: %v\n", method, params)
@@ -768,21 +816,23 @@ func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 	// check params
 	fnType := fn.Type()
 	if fnType.NumIn() != len(params) {
-		return ReturnVal{nil, &JsonRpcError{Code: -32602,
-			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}}
+		return nil, &JsonRpcError{Code: -32602,
+			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, fnType.NumIn(), len(params))}
 	}
 
 	if len(idlFunc.Params) != len(params) {
-		return ReturnVal{nil, &JsonRpcError{Code: -32602,
-			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, len(idlFunc.Params), len(params))}}
+		return nil, &JsonRpcError{Code: -32602,
+			Message: fmt.Sprintf("Method %s expects %d params but was passed %d", method, len(idlFunc.Params), len(params))}
 	}
+
+	rr := &RequestResponse{headers, method, params, handler, nil, nil}
 
 	// run filters - PreInvoke
 	flen := len(s.filters)
 	for i := 0; i < flen; i++ {
-		r := s.filters[i].PreInvoke(method, params, handler)
-		if r != nil {
-			return *r
+		ok := s.filters[i].PreInvoke(rr)
+		if !ok {
+			return rr.Result, rr.Err
 		}
 	}
 
@@ -795,7 +845,7 @@ func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 		paramConv := newConvert(s.idl, &idlField, desiredType, param, path)
 		converted, err := paramConv.run()
 		if err != nil {
-			return ReturnVal{nil, &JsonRpcError{Code: -32602, Message: err.Error()}}
+			return nil, &JsonRpcError{Code: -32602, Message: err.Error()}
 		}
 		paramVals = append(paramVals, converted)
 	}
@@ -804,30 +854,29 @@ func (s *Server) Call(method string, params ...interface{}) ReturnVal {
 	ret := fn.Call(paramVals)
 	if len(ret) != 2 {
 		msg := fmt.Sprintf("Method %s did not return 2 values. len(ret)=%d", method, len(ret))
-		return ReturnVal{nil, &JsonRpcError{Code: -32603, Message: msg}}
+		return nil, &JsonRpcError{Code: -32603, Message: msg}
 	}
 
 	ret0 := ret[0].Interface()
 	ret1 := ret[1].Interface()
 
-	retval := ReturnVal{}
-	retval.result = ret0
+	rr.Result = ret0
 	if ret1 != nil {
 		e, ok := ret1.(error)
 		if ok {
-			retval.err = e
+			rr.Err = e
 		}
 	}
 
 	// run filters - PostInvoke
 	for i := flen - 1; i >= 0; i-- {
-		ok := s.filters[i].PostInvoke(method, params, &retval)
+		ok := s.filters[i].PostInvoke(rr)
 		if !ok {
 			break
 		}
 	}
 
-	return retval
+	return rr.Result, rr.Err
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -836,7 +885,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	resp := s.InvokeBytes(buf.Bytes())
+	resp := s.InvokeBytes(req.Header, buf.Bytes())
 	w.Header().Set("Content-Type", s.ser.MimeType())
 	fmt.Fprintf(w, string(resp))
 }

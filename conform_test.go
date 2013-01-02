@@ -220,11 +220,10 @@ func TestServerCallSuccess(t *testing.T) {
 	}
 
 	for x, generic := range genericCalls {
-		retval := svr.Call(generic.method, generic.params...)
-		res := retval.result
-		err := toJsonRpcError(generic.method, retval.err)
+		res, err := svr.Call(generic.method, generic.params...)
+		e := toJsonRpcError(generic.method, err)
 
-		if err == nil {
+		if e == nil {
 			if generic.errcode == 0 {
 				if !reflect.DeepEqual(generic.result, res) {
 					t.Errorf("generic[%d] - %v != %v", x, generic.result, res)
@@ -234,9 +233,9 @@ func TestServerCallSuccess(t *testing.T) {
 			}
 		} else {
 			if generic.errcode == 0 {
-				t.Errorf("generic[%d] - expected success, got err: %v", x, err)
-			} else if generic.errcode != err.Code {
-				t.Errorf("generic[%d] - expected errcode %d, got err: %v", x, generic.errcode, err)
+				t.Errorf("generic[%d] - expected success, got err: %v", x, e)
+			} else if generic.errcode != e.Code {
+				t.Errorf("generic[%d] - expected errcode %d, got err: %v", x, generic.errcode, e)
 			}
 		}
 	}
@@ -248,15 +247,15 @@ func TestServerCallSuccess(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		retval := svr.Call("B.echo", call.in)
-		if retval.err != nil {
-			t.Fatalf("B.echo retval.err !=nil - result=%v err=%v", retval.result, retval.err)
+		res, err := svr.Call("B.echo", call.in)
+		if err != nil {
+			t.Fatalf("B.echo retval.err !=nil - result=%v err=%v", res, err)
 		}
 
-		resStr, ok := retval.result.(*string)
+		resStr, ok := res.(*string)
 		if !ok {
 			s := fmt.Sprintf("B.echo return val cannot be converted to *string. type=%v",
-				reflect.TypeOf(retval.result).Name())
+				reflect.TypeOf(res).Name())
 			t.Fatal(s)
 		}
 
@@ -280,9 +279,8 @@ func TestServerCallFail(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		retval := svr.Call(call.method)
-		res := retval.result
-		err := retval.err.(*JsonRpcError)
+		res, e := svr.Call(call.method)
+		err := e.(*JsonRpcError)
 		if res != nil {
 			t.Errorf("%v != nil on expected fail call: %s", res, call.method)
 		} else if err == nil {
@@ -478,16 +476,16 @@ func TestServerBarristerIdl(t *testing.T) {
 }
 
 type ProxyFilter struct {
-	pre  func(method string, params []interface{}, handler interface{}) *ReturnVal
-	post func(method string, params []interface{}, retval *ReturnVal) bool
+	pre  func(r *RequestResponse) bool
+	post func(r *RequestResponse) bool
 }
 
-func (f ProxyFilter) PreInvoke(method string, params []interface{}, handler interface{}) *ReturnVal {
-	return f.pre(method, params, handler)
+func (f ProxyFilter) PreInvoke(r *RequestResponse) bool {
+	return f.pre(r)
 }
 
-func (f ProxyFilter) PostInvoke(method string, params []interface{}, retval *ReturnVal) bool {
-	return f.post(method, params, retval)
+func (f ProxyFilter) PostInvoke(r *RequestResponse) bool {
+	return f.post(r)
 }
 
 func TestFilterOrder(t *testing.T) {
@@ -504,23 +502,23 @@ func TestFilterOrder(t *testing.T) {
 	aClone := false
 	bClone := false
 
-	createPre := func(id int) func(method string, params []interface{}, handler interface{}) *ReturnVal {
-		return func(method string, params []interface{}, handler interface{}) *ReturnVal {
-			filterLog = append(filterLog, fmt.Sprintf("%d: pre: %s", id, method))
-			switch t := handler.(type) {
+	createPre := func(id int) func(r *RequestResponse) bool {
+		return func(r *RequestResponse) bool {
+			filterLog = append(filterLog, fmt.Sprintf("%d: pre: %s", id, r.Method))
+			switch t := r.Handler.(type) {
 			case AImpl:
 				aClone = t.cloned
 			case BImpl:
 				bClone = t.cloned
 			default:
-				fmt.Println("Unknown type:", reflect.TypeOf(handler))
+				fmt.Println("Unknown type:", reflect.TypeOf(r.Handler))
 			}
-			return nil
+			return true
 		}
 	}
-	createPost := func(id int) func(method string, params []interface{}, retval *ReturnVal) bool {
-		return func(method string, params []interface{}, retval *ReturnVal) bool {
-			filterLog = append(filterLog, fmt.Sprintf("%d: post: %s", id, method))
+	createPost := func(id int) func(r *RequestResponse) bool {
+		return func(r *RequestResponse) bool {
+			filterLog = append(filterLog, fmt.Sprintf("%d: post: %s", id, r.Method))
 			return true
 		}
 	}
@@ -552,11 +550,11 @@ func TestFilterOrder(t *testing.T) {
 	}
 }
 
-func resultOk(v ReturnVal) ReturnVal {
-	if v.err != nil {
-		panic(v.err)
+func resultOk(result interface{}, err error) interface{} {
+	if err != nil {
+		panic(err)
 	}
-	return v
+	return result
 }
 
 func TestCloneModifiesHandler(t *testing.T) {
@@ -565,25 +563,68 @@ func TestCloneModifiesHandler(t *testing.T) {
 	bimpl := BImpl{context: &Context{}}
 	svr.AddHandler("B", bimpl)
 
-	pre := func(method string, params []interface{}, handler interface{}) *ReturnVal {
-		switch t := handler.(type) {
+	pre := func(r *RequestResponse) bool {
+		switch t := r.Handler.(type) {
 		case BImpl:
 			t.context.UserId = 100
 		default:
-			fmt.Println("unknown type:", reflect.TypeOf(handler))
+			fmt.Println("unknown type:", reflect.TypeOf(r.Handler))
 		}
-		return nil
+		return true
 	}
 
-	post := func(method string, params []interface{}, retval *ReturnVal) bool {
+	post := func(r *RequestResponse) bool {
 		return true
 	}
 
 	svr.AddFilter(ProxyFilter{pre, post})
 
 	r := resultOk(svr.Call("B.echo", "get-userid"))
-	s, ok := r.result.(*string)
+	s, ok := r.(*string)
 	if !ok || *s != "100" {
 		t.Errorf("get-userid != 100: %v", *s)
+	}
+}
+
+func TestFilterReturnErr(t *testing.T) {
+	idl := parseTestIdl()
+	svr := NewJSONServer(idl, true)
+	bimpl := BImpl{context: &Context{}}
+	svr.AddHandler("B", bimpl)
+
+	preCount := 0
+	postCount := 0
+
+	pre := func(r *RequestResponse) bool {
+		preCount++
+
+		if r.Params[0] == "pre-err" {
+			r.Err = &JsonRpcError{Code: 800, Message: "errmsg here"}
+			return false
+		}
+
+		return true
+	}
+
+	post := func(r *RequestResponse) bool {
+		postCount++
+		return true
+	}
+
+	svr.AddFilter(ProxyFilter{pre, post})
+	svr.AddFilter(ProxyFilter{pre, post})
+
+	res, err := svr.Call("B.echo", "pre-err")
+	if err == nil || !reflect.DeepEqual(err, &JsonRpcError{Code: 800, Message: "errmsg here"}) {
+		t.Errorf("pre-err didn't return err: %v %v", res, err)
+	}
+	if res != nil {
+		t.Errorf("res is not nil: %v", res)
+	}
+	if preCount != 1 {
+		t.Errorf("preCount != 1: %d", preCount)
+	}
+	if postCount != 0 {
+		t.Errorf("postCount != 0: %d", postCount)
 	}
 }
