@@ -219,8 +219,10 @@ func TestServerCallSuccess(t *testing.T) {
 		GenericCall{"A.calc", []interface{}{[]float64{2, 3}, "multiply"}, float64(6), 0},
 	}
 
+	headers := make(map[string][]string)
+
 	for x, generic := range genericCalls {
-		res, err := svr.Call(generic.method, generic.params...)
+		res, err := svr.Call(headers, generic.method, generic.params...)
 		e := toJsonRpcError(generic.method, err)
 
 		if e == nil {
@@ -247,7 +249,7 @@ func TestServerCallSuccess(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		res, err := svr.Call("B.echo", call.in)
+		res, err := svr.Call(headers, "B.echo", call.in)
 		if err != nil {
 			t.Fatalf("B.echo retval.err !=nil - result=%v err=%v", res, err)
 		}
@@ -271,6 +273,8 @@ func TestServerCallFail(t *testing.T) {
 	svr := NewJSONServer(idl, true)
 	svr.AddHandler("B", bimpl)
 
+	headers := make(map[string][]string)
+
 	calls := []CallFail{
 		CallFail{"B.", -32601},
 		CallFail{"", -32601},
@@ -279,7 +283,7 @@ func TestServerCallFail(t *testing.T) {
 	}
 
 	for _, call := range calls {
-		res, e := svr.Call(call.method)
+		res, e := svr.Call(headers, call.method)
 		err := e.(*JsonRpcError)
 		if res != nil {
 			t.Errorf("%v != nil on expected fail call: %s", res, call.method)
@@ -304,6 +308,8 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 		EchoCall{"return-null", nil},
 	}
 
+	headers := make(map[string][]string)
+
 	for _, call := range calls {
 		req := JsonRpcRequest{Id: "123", Method: "B.echo", Params: []interface{}{call.in}}
 		reqBytes, err := json.Marshal(req)
@@ -311,7 +317,7 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		resBytes := svr.InvokeBytes(reqBytes)
+		resBytes := svr.InvokeBytes(headers, reqBytes)
 		resp := JsonRpcResponse{}
 		err = json.Unmarshal(resBytes, &resp)
 		if err != nil {
@@ -461,9 +467,11 @@ func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
 	svr := NewJSONServer(idl, true)
 
+	headers := make(map[string][]string)
+
 	rpcReq := JsonRpcRequest{Id: "123", Method: "barrister-idl", Params: ""}
 	reqJson, _ := json.Marshal(rpcReq)
-	respJson := svr.InvokeBytes(reqJson)
+	respJson := svr.InvokeBytes(headers, reqJson)
 	rpcResp := BarristerIdlRpcResponse{}
 	err := json.Unmarshal(respJson, &rpcResp)
 	if err != nil {
@@ -523,13 +531,15 @@ func TestFilterOrder(t *testing.T) {
 		}
 	}
 
+	headers := make(map[string][]string)
+
 	// add filter twice with different IDs
 	svr.AddFilter(ProxyFilter{createPre(1), createPost(1)})
 	svr.AddFilter(ProxyFilter{createPre(2), createPost(2)})
 
-	resultOk(svr.Call("A.add", 1, 2))
-	resultOk(svr.Call("B.echo", "foo"))
-	resultOk(svr.Call("B.echo", "foo"))
+	resultOk(svr.Call(headers, "A.add", 1, 2))
+	resultOk(svr.Call(headers, "B.echo", "foo"))
+	resultOk(svr.Call(headers, "B.echo", "foo"))
 
 	// assert that PreInvoke is called in order, PostInvoke is called in reverse order
 	expectedLog := []string{"1: pre: A.add", "2: pre: A.add", "2: post: A.add", "1: post: A.add",
@@ -579,7 +589,9 @@ func TestCloneModifiesHandler(t *testing.T) {
 
 	svr.AddFilter(ProxyFilter{pre, post})
 
-	r := resultOk(svr.Call("B.echo", "get-userid"))
+	headers := make(map[string][]string)
+
+	r := resultOk(svr.Call(headers, "B.echo", "get-userid"))
 	s, ok := r.(*string)
 	if !ok || *s != "100" {
 		t.Errorf("get-userid != 100: %v", *s)
@@ -611,10 +623,12 @@ func TestFilterReturnErr(t *testing.T) {
 		return true
 	}
 
+	headers := make(map[string][]string)
+
 	svr.AddFilter(ProxyFilter{pre, post})
 	svr.AddFilter(ProxyFilter{pre, post})
 
-	res, err := svr.Call("B.echo", "pre-err")
+	res, err := svr.Call(headers, "B.echo", "pre-err")
 	if err == nil || !reflect.DeepEqual(err, &JsonRpcError{Code: 800, Message: "errmsg here"}) {
 		t.Errorf("pre-err didn't return err: %v %v", res, err)
 	}
