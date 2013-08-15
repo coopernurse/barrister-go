@@ -3,7 +3,7 @@ package barrister
 import (
 	"encoding/json"
 	"fmt"
-	. "github.com/sdegutis/go.assert"
+	. "github.com/couchbaselabs/go.assert"
 	"io/ioutil"
 	"reflect"
 	"testing"
