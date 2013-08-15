@@ -1,6 +1,6 @@
 language: go
 install:
-  - go get github.com/sdegutis/go.assert
+  - go get github.com/couchbaselabs/go.assert
 before_script:
   - mkdir -p conform/generated
 after_script:
