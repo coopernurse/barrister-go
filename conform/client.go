@@ -73,10 +73,11 @@ func (line *ConformLine) Params() []interface{} {
 }
 
 func (line *ConformLine) HandleResponse(result interface{}, err error) {
-	if err != nil {
-		rpcerr := err.(*barrister.JsonRpcError)
-		line.act_status = "rpcerr"
+	rpcerr, ok := err.(*barrister.JsonRpcError)
+	if ok && rpcerr != nil {
 		line.act_result = fmt.Sprintf("%d", rpcerr.Code)
+		line.act_status = "rpcerr"
+
 	} else {
 		line.act_status = "ok"
 
