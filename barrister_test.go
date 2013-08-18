@@ -5,6 +5,7 @@ import (
 	"fmt"
 	. "github.com/couchbaselabs/go.assert"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -67,8 +68,15 @@ func createTestIdl() *Idl {
 func TestIdl2Go(t *testing.T) {
 	idl := parseTestIdl()
 
-	code := idl.GenerateGo("conform", true)
-	ioutil.WriteFile("conform/generated/conform.go", code, 0644)
+	pkgNameToCode := idl.GenerateGo("conform", "", true)
+	err := os.MkdirAll("conform/generated", 0755)
+	if err != nil {
+		t.Error(err)
+	}
+	err = ioutil.WriteFile("conform/generated/conform.go", pkgNameToCode["conform"], 0644)
+	if err != nil {
+		t.Error(err)
+	}
 }
 
 func TestParseMethod(t *testing.T) {
