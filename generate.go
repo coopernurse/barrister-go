@@ -26,32 +26,58 @@ func escReserved(s string) string {
 }
 
 type generateGo struct {
-	idl           *Idl
-	pkgName       string
+	// full IDL from JSON file
+	idl *Idl
+
+	// sub-set of IDL that only contains elements in this package
+	pkgIdl *Idl
+
+	// go package name for this file
+	pkgName string
+
+	// if true, [optional] fields will be generated as pointers
+	// if false, "omitempty" will be added to the json tag
 	optionalToPtr bool
+
+	// imports to add
+	imports []string
+
+	// base import string to prefix to imports values
+	baseImport string
+}
+
+func (g *generateGo) hasInterface() bool {
+	return len(g.pkgIdl.interfaces) > 0
 }
 
 func (g *generateGo) generate() []byte {
 	b := &bytes.Buffer{}
 	line(b, 0, fmt.Sprintf("package %s\n", g.pkgName))
 	line(b, 0, "import (")
-	line(b, 1, `"fmt"`)
-	line(b, 1, `"reflect"`)
-	line(b, 1, `"github.com/coopernurse/barrister-go"`)
+	if g.hasInterface() {
+		line(b, 1, `"fmt"`)
+		line(b, 1, `"reflect"`)
+		line(b, 1, `"github.com/coopernurse/barrister-go"`)
+	}
+	for _, imp := range g.imports {
+		line(b, 1, fmt.Sprintf("\"%s%s\"", g.baseImport, imp))
+	}
 	line(b, 0, ")\n")
 
-	line(b, 0, "const BarristerVersion string = \""+g.idl.Meta.BarristerVersion+"\"")
-	line(b, 0, "const BarristerChecksum string = \""+g.idl.Meta.Checksum+"\"")
-	line(b, 0, fmt.Sprintf("const BarristerDateGenerated int64 = %d", g.idl.Meta.DateGenerated))
-	line(b, 0, "")
+	if g.hasInterface() {
+		line(b, 0, "const BarristerVersion string = \""+g.idl.Meta.BarristerVersion+"\"")
+		line(b, 0, "const BarristerChecksum string = \""+g.idl.Meta.Checksum+"\"")
+		line(b, 0, fmt.Sprintf("const BarristerDateGenerated int64 = %d", g.idl.Meta.DateGenerated))
+		line(b, 0, "")
+	}
 
-	for name, _ := range g.idl.enums {
+	for name, _ := range g.pkgIdl.enums {
 		g.generateEnum(b, name)
 	}
 
-	for _, elem := range g.idl.elems {
+	for _, elem := range g.pkgIdl.elems {
 		if elem.Type == "struct" {
-			s, ok := g.idl.structs[elem.Name]
+			s, ok := g.pkgIdl.structs[elem.Name]
 			if !ok {
 				panic("No struct found: " + elem.Name)
 			}
@@ -60,15 +86,16 @@ func (g *generateGo) generate() []byte {
 	}
 	line(b, 0, "")
 
-	for _, name := range sortedKeys(g.idl.interfaces) {
-		g.generateInterface(b, name)
-		line(b, 0, "}\n")
-		g.generateProxy(b, name)
+	if g.hasInterface() {
+		for _, name := range sortedKeys(g.pkgIdl.interfaces) {
+			g.generateInterface(b, name)
+			line(b, 0, "}\n")
+			g.generateProxy(b, name)
+		}
+
+		g.generateNewServer(b)
+		g.generateIdlJson(b)
 	}
-
-	g.generateNewServer(b)
-
-	g.generateIdlJson(b)
 
 	return b.Bytes()
 }
@@ -89,7 +116,7 @@ func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
 		panic("No enum found: " + enumName)
 	}
 
-	goName := capitalize(enumName)
+	goName := capitalizeAndStripMatchingPkg(enumName, g.pkgName)
 	line(b, 0, fmt.Sprintf("type %s string", goName))
 	line(b, 0, "const (")
 	for x, val := range vals {
@@ -104,16 +131,19 @@ func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
 }
 
 func (g *generateGo) generateStruct(b *bytes.Buffer, s *Struct) {
-	goName := capitalize(s.Name)
+	goName := capitalizeAndStripMatchingPkg(s.Name, g.pkgName)
 	line(b, 0, fmt.Sprintf("type %s struct {", goName))
-	for _, f := range s.allFields {
+	if s.Extends != "" {
+		line(b, 1, capitalizeAndStripMatchingPkg(s.Extends, g.pkgName))
+	}
+	for _, f := range s.Fields {
 		goName = capitalize(f.Name)
 		omit := ""
 		if f.Optional {
 			omit = ",omitempty"
 		}
 		line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`",
-			goName, f.goType(g.optionalToPtr), f.Name, omit))
+			goName, f.goType(g.optionalToPtr, g.pkgName), f.Name, omit))
 	}
 	line(b, 0, "}\n")
 }
@@ -158,10 +188,10 @@ func (g *generateGo) generateInterface(b *bytes.Buffer, ifaceName string) {
 			if x > 0 {
 				params += ", "
 			}
-			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.optionalToPtr))
+			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.optionalToPtr, g.pkgName))
 		}
 		line(b, 1, fmt.Sprintf("%s(%s) (%s, error)",
-			goName, params, fn.Returns.goType(g.optionalToPtr)))
+			goName, params, fn.Returns.goType(g.optionalToPtr, g.pkgName)))
 	}
 }
 
@@ -182,8 +212,8 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 	line(b, 0, "}\n")
 	for _, fn := range funcs {
 		method := fmt.Sprintf("%s.%s", ifaceName, fn.Name)
-		retType := fn.Returns.goType(g.optionalToPtr)
-		zeroVal := fn.Returns.zeroVal(g.idl, g.optionalToPtr)
+		retType := fn.Returns.goType(g.optionalToPtr, g.pkgName)
+		zeroVal := fn.Returns.zeroVal(g.idl, g.optionalToPtr, g.pkgName)
 		fnName := capitalize(fn.Name)
 		params := ""
 		paramIdents := ""
@@ -192,7 +222,7 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 				params += ", "
 			}
 			ident := escReserved(p.Name)
-			params += fmt.Sprintf("%s %s", ident, p.goType(g.optionalToPtr))
+			params += fmt.Sprintf("%s %s", ident, p.goType(g.optionalToPtr, g.pkgName))
 			paramIdents += ", "
 			paramIdents += ident
 		}

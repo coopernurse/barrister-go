@@ -133,10 +133,10 @@ type Field struct {
 	Comment  string `json:"comment"`
 }
 
-func (f Field) goType(optionalToPtr bool) string {
+func (f Field) goType(optionalToPtr bool, pkgToStrip string) string {
 	if f.IsArray {
 		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
-		return "[]" + f2.goType(optionalToPtr)
+		return "[]" + f2.goType(optionalToPtr, pkgToStrip)
 	}
 
 	prefix := ""
@@ -155,17 +155,17 @@ func (f Field) goType(optionalToPtr bool) string {
 		return prefix + "bool"
 	}
 
-	return prefix + f.Type
+	return prefix + capitalizeAndStripMatchingPkg(f.Type, pkgToStrip)
 }
 
-func (f Field) zeroVal(idl *Idl, optionalToPtr bool) interface{} {
+func (f Field) zeroVal(idl *Idl, optionalToPtr bool, pkgToStrip string) interface{} {
 
 	if f.Optional && optionalToPtr {
 		return "nil"
 	}
 
 	if f.IsArray {
-		return f.goType(false) + "{}"
+		return f.goType(false, pkgToStrip) + "{}"
 	}
 
 	switch f.Type {
@@ -181,7 +181,7 @@ func (f Field) zeroVal(idl *Idl, optionalToPtr bool) interface{} {
 
 	s, ok := idl.structs[f.Type]
 	if ok {
-		return capitalize(s.Name) + "{}"
+		return capitalizeAndStripMatchingPkg(s.Name, pkgToStrip) + "{}"
 	}
 
 	e, ok := idl.enums[f.Type]
@@ -279,13 +279,106 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields []Field) []Field {
 	return allFields
 }
 
-func (idl *Idl) GenerateGo(pkgName string, optionalToPtr bool) []byte {
-	g := generateGo{idl, pkgName, optionalToPtr}
-	return g.generate()
+func (idl *Idl) GenerateGo(defaultPkgName string, baseImport string, optionalToPtr bool) map[string][]byte {
+	pkgNameToGoCode := make(map[string][]byte)
+	for _, namespacedIdl := range partitionIdlByNamespace(idl, defaultPkgName) {
+		g := generateGo{idl,
+			namespacedIdl.idl,
+			namespacedIdl.pkgName,
+			optionalToPtr,
+			namespacedIdl.imports,
+			baseImport}
+		pkgNameToGoCode[namespacedIdl.pkgName] = g.generate()
+	}
+	return pkgNameToGoCode
 }
 
 func (idl *Idl) Method(name string) Function {
 	return idl.methods[name]
+}
+
+type NamespacedIdl struct {
+	idl     *Idl
+	pkgName string
+	imports []string
+}
+
+func partitionIdlByNamespace(idl *Idl, defaultPkgName string) []NamespacedIdl {
+	var metaElem IdlJsonElem
+	pkgNameToIdlElems := make(map[string][]IdlJsonElem)
+	for _, elem := range idl.elems {
+		if elem.Type == "meta" {
+			metaElem = elem
+		} else {
+			pkg, _ := splitNs(elem.Name)
+			if pkg == "" {
+				pkg = defaultPkgName
+			}
+
+			elems, ok := pkgNameToIdlElems[pkg]
+			if !ok {
+				elems = make([]IdlJsonElem, 0)
+			}
+			pkgNameToIdlElems[pkg] = append(elems, elem)
+		}
+	}
+
+	namespacedIdl := make([]NamespacedIdl, 0)
+	for pkg, elems := range pkgNameToIdlElems {
+		elems = append(elems, metaElem)
+		idl := NewIdl(elems)
+		imports := findAllImports(pkg, elems)
+		namespacedIdl = append(namespacedIdl, NamespacedIdl{idl, pkg, imports})
+	}
+	return namespacedIdl
+}
+
+func splitNs(name string) (string, string) {
+	i := strings.Index(name, ".")
+	if i > -1 && i < (len(name)-1) {
+		return name[0:i], name[i+1:]
+	}
+	return "", name
+}
+
+func findAllImports(pkgToIgnore string, elems []IdlJsonElem) []string {
+	imports := make([]string, 0)
+	for _, elem := range elems {
+		ns, _ := splitNs(elem.Extends)
+		imports = addIfNotInSlice(ns, pkgToIgnore, imports)
+
+		for _, f := range elem.Fields {
+			ns, _ := splitNs(f.Type)
+			imports = addIfNotInSlice(ns, pkgToIgnore, imports)
+		}
+
+		for _, fx := range elem.Functions {
+			ns, _ := splitNs(fx.Returns.Type)
+			imports = addIfNotInSlice(ns, pkgToIgnore, imports)
+			for _, f := range fx.Params {
+				ns, _ := splitNs(f.Type)
+				imports = addIfNotInSlice(ns, pkgToIgnore, imports)
+			}
+		}
+	}
+
+	return imports
+}
+
+func addIfNotInSlice(a string, toIgnore string, list []string) []string {
+	if a != "" && a != toIgnore && !stringInSlice(a, list) {
+		return append(list, a)
+	}
+	return list
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
 
 //////////////////////////////////////////////////
@@ -461,8 +554,6 @@ type HttpTransport struct {
 }
 
 func (t *HttpTransport) Send(in []byte) ([]byte, error) {
-
-	//fmt.Printf("request:\n%s\n", post)
 
 	req, err := http.NewRequest("POST", t.Url, bytes.NewBuffer(in))
 	if err != nil {

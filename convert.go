@@ -320,3 +320,14 @@ func capitalize(s string) string {
 	}
 	return strings.ToUpper(s[0:1]) + s[1:]
 }
+
+func capitalizeAndStripMatchingPkg(s string, pkgToStrip string) string {
+	ns, name := splitNs(s)
+	if ns == "" {
+		return capitalize(s)
+	} else if ns == pkgToStrip {
+		return capitalize(name)
+	}
+
+	return ns + "." + capitalize(name)
+}
