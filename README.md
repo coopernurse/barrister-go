@@ -6,9 +6,26 @@ This project contains Go bindings for the Barrister RPC system.
 
 ## Installation
 
-Install the package:
+    # Install the barrister translator (IDL -> JSON)
+    pip install barrister
 
+    # Install barrister-go
+    go install github.com/coopernurse/barrister-go/idl2go
+
+## Run example
+
+    # Clone repo containing example
     go get github.com/coopernurse/barrister-go
 
-More docs to come.. still a work in progress.    
+    # Generate Go code from calc.idl
+    cd $GOPATH/src/github.com/coopernurse/barrister-go/example
+    barrister calc.idl | $GOPATH/bin/idl2go -i -calc
+
+    # Compile and run server in background
+    go run server.go &
+
+    # Compile and run client
+    go run client.go
+
+
 
