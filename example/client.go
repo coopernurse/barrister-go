@@ -16,5 +16,10 @@ func main() {
 	calc := NewCalculatorProxy("http://localhost:9233")
 
 	res, err := calc.Add(51, 22.3)
-	fmt.Printf("51+22.3=%f - err=%v\n", res, err)
+	if err == nil {
+		fmt.Println("Success!  51+22.3 =", res)
+	} else {
+		fmt.Println("ERROR! ", err)
+	}
+
 }
