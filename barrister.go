@@ -432,7 +432,7 @@ type RequestResponse struct {
 
 	// handler instance that will process
 	// this request method - this is passed
-	// by value, so pointer fields in the handler
+	// by value, so only pointer fields in the handler
 	// may be modified by filters
 	Handler interface{}
 
@@ -667,19 +667,25 @@ func (c *RemoteClient) Call(method string, params ...interface{}) (interface{}, 
 ////////////
 
 // If a server handler implements Cloneable, it will
-// be cloned per JSON-RPC call.  Used in conjunction with
-// Filters, this allows you to initialize out of band context 
-// that your service implementation may need.  The most common
-// example is security information.  A Filter might check HTTP
-// headers and resolve the caller's identity and role and set that
-// as context on the cloned service implementation.
-//
-// Another use case is thread safety.  By implementing Cloneable
+// be cloned per JSON-RPC call.  This allows you to initialize out 
+// of band context that your service implementation may need such
+// as auth headers.
+// 
+// In addition, by implementing Cloneable
 // your services no longer need to be threadsafe, and can safely store
 // state locally for the lifetime of the service method invocation.
 //
 type Cloneable interface {
-	Clone() interface{}
+	// CloneForReq is called after the JSON-RPC request is 
+	// decoded, but before the RPC method call is invoked.
+	//
+	// headers is a (potentially empty) map of transport headers
+	// associated with the request.
+	//
+	// A copy of the implementing struct should be returned.
+	// This copy will be used for a single RPC method call and
+	// then discarded.
+	CloneForReq(headers map[string][]string) interface{}
 }
 
 // Filters allow you to intercept requests before and after the handler method
@@ -892,7 +898,7 @@ func (s *Server) Call(headers map[string][]string, method string, params ...inte
 	// If handler supports cloning, create a new instance for this request
 	c, ok := handler.(Cloneable)
 	if ok {
-		handler = c.Clone()
+		handler = c.CloneForReq(headers)
 	}
 
 	elem := reflect.ValueOf(handler)

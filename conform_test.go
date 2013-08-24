@@ -119,7 +119,7 @@ type BImpl struct {
 }
 
 // BImpl is Cloneable
-func (i BImpl) Clone() interface{} {
+func (i BImpl) CloneForReq(headers map[string][]string) interface{} {
 	return BImpl{true, &Context{}, make([]string, 0)}
 }
 
