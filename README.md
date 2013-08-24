@@ -1,8 +1,8 @@
-[![build status](https://secure.travis-ci.org/coopernurse/barrister-go.png)](http://travis-ci.org/coopernurse/barrister-go)
-
 # Barrister for Go
 
 This project contains Go bindings for the Barrister RPC system.
+
+[![build status](https://secure.travis-ci.org/coopernurse/barrister-go.png)](http://travis-ci.org/coopernurse/barrister-go)
 
 For information on how to write a Barrister IDL, please visit:
 

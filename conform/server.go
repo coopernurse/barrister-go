@@ -47,7 +47,7 @@ func (i AImpl) Sqrt(a float64) (float64, error) {
 // RepeatResponse.items should be a list of strings
 // whose length is equal to req1.count
 func (a AImpl) Repeat(req1 RepeatRequest) (RepeatResponse, error) {
-	rr := RepeatResponse{Status: "ok", Count: req1.Count, Items: []string{}}
+	rr := RepeatResponse{Response{"ok"}, req1.Count, []string{}}
 
 	s := req1.To_repeat
 	if req1.Force_uppercase {

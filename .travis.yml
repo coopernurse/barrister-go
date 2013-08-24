@@ -1,9 +1,4 @@
 language: go
 install:
   - go get github.com/couchbaselabs/go.assert
-before_script:
-  - go test
-after_script:
-  - go build conform/generated/conform.go
-  - go build conform/client.go
-  - go build conform/server.go
+script: ./test.sh
