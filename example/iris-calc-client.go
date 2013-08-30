@@ -22,7 +22,7 @@ func main() {
 
 	for i := 0; i < 10000; i++ {
 		res, err := proxy.Add(1, 2)
-		if res != 3 {
+		if err != nil {
 			log.Fatal("Unexpected error: ", err)
 		} else if res != 3 {
 			log.Fatal("Unexpected result: ", res)
