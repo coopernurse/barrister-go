@@ -15,8 +15,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer conn.Close()
 
-	trans := &bariris.IrisTransport{"calc", time.Millisecond * 30000, conn}
+	trans := &bariris.IrisTransport{"calc", time.Second * 30, conn}
 	client := barrister.NewRemoteClient(trans, true)
 	proxy := calc.NewCalculatorProxy(client)
 
@@ -28,5 +29,4 @@ func main() {
 			log.Fatal("Unexpected result: ", res)
 		}
 	}
-	conn.Close()
 }

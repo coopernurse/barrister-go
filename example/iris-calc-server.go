@@ -6,6 +6,8 @@ import (
 	"github.com/coopernurse/barrister-go/iris"
 	"github.com/karalabe/iris-go"
 	"log"
+	"os"
+	"os/signal"
 )
 
 const relayPort int = 55555
@@ -27,13 +29,15 @@ func start() {
 	svr := calc.NewJSONServer(idl, true, CalculatorImpl{})
 
 	handler := &bariris.IrisHandler{svr}
-	_, err := iris.Connect(relayPort, app, handler)
+	conn, err := iris.Connect(relayPort, app, handler)
 	if err != nil {
 		log.Fatalf("connection failed: %v.", err)
 	}
+	defer conn.Close()
 
-	c := make(chan bool)
-	<-c
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
 }
 
 func main() {
