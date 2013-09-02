@@ -4,7 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/coopernurse/barrister-go"
-	. "github.com/coopernurse/barrister-go/conform/generated"
+	. "github.com/coopernurse/barrister-go/conform/generated/conform"
+        "github.com/coopernurse/barrister-go/conform/generated/inc"
 	"math"
 	"net/http"
 	"strings"
@@ -16,15 +17,15 @@ func (i AImpl) Add(a int64, b int64) (int64, error) {
 	return a + b, nil
 }
 
-func (a AImpl) Calc(nums []float64, operation MathOp) (float64, error) {
+func (a AImpl) Calc(nums []float64, operation inc.MathOp) (float64, error) {
 	switch operation {
-	case MathOpAdd:
+	case inc.MathOpAdd:
 		sum := float64(0)
 		for i := 0; i < len(nums); i++ {
 			sum += nums[i]
 		}
 		return sum, nil
-	case MathOpMultiply:
+	case inc.MathOpMultiply:
 		x := float64(1)
 		for i := 0; i < len(nums); i++ {
 			x = x * nums[i]
@@ -47,7 +48,7 @@ func (i AImpl) Sqrt(a float64) (float64, error) {
 // RepeatResponse.items should be a list of strings
 // whose length is equal to req1.count
 func (a AImpl) Repeat(req1 RepeatRequest) (RepeatResponse, error) {
-	rr := RepeatResponse{Response{"ok"}, req1.Count, []string{}}
+	rr := RepeatResponse{inc.Response{"ok"}, req1.Count, []string{}}
 
 	s := req1.To_repeat
 	if req1.Force_uppercase {
