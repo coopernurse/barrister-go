@@ -4,3 +4,5 @@ conform/generated
 client
 server
 example/calc/
+example/calc.json
+*.exe
