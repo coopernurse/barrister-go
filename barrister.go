@@ -306,12 +306,15 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields []Field) []Field {
 // Typically you'll use the idl2go binary as a front end to this method, but this method is exposed
 // if you wish to write your own code generation tooling.
 //
-// * defaultPkgName - Go package name to use for non-namespaced elements.  Since interfaces are never
-//   namespaced in Barrister, all interfaces will be generated into this package.
-// * baseImport - Base Go import path to use for internal imports.  For example, if "myproject" is provided,
-//   and two packages "usersvc" and "common" are resolved, then "usersvc" will import "myproject/common"
-// * optionalToPtr - If true struct fields marked `[optional]` will be generated as Go pointers.  If false,
-//   they will be generated as non-pointer types with `omitempty` in the JSON tag
+// defaultPkgName - Go package name to use for non-namespaced elements.  Since interfaces are never
+// namespaced in Barrister, all interfaces will be generated into this package.
+//
+// baseImport - Base Go import path to use for internal imports.  For example, if "myproject" is provided,
+// and two packages "usersvc" and "common" are resolved, then "usersvc" will import "myproject/common"
+//
+// optionalToPtr - If true struct fields marked `[optional]` will be generated as Go pointers.  If false,
+// they will be generated as non-pointer types with `omitempty` in the JSON tag
+//
 func (idl *Idl) GenerateGo(defaultPkgName string, baseImport string, optionalToPtr bool) map[string][]byte {
 	pkgNameToGoCode := make(map[string][]byte)
 	for _, nsIdl := range partitionIdlByNamespace(idl, defaultPkgName) {
@@ -835,9 +838,8 @@ type Server struct {
 }
 
 // AddFilter registers a Filter implementation with the Server.
-//
-// * Filter.PreInvoke is called in the order of registration
-// * Filter.PostInvoke is called in reverse order of registration
+// Filter.PreInvoke is called in the order of registration.
+// Filter.PostInvoke is called in reverse order of registration.
 //
 func (s *Server) AddFilter(f Filter) {
 	s.filters = append(s.filters, f)
@@ -1010,17 +1012,24 @@ func (s *Server) CallBatch(headers map[string][]string, batch []JsonRpcRequest) 
 // Call handles a single JSON-RPC request.  The JSON-RPC method is parsed and the appropriate
 // handler for the given interface is resolved.  The execution order is:
 //
-// * The method is checked against the IDL.  If the IDL does not define this method an error is returned.
-// * The handler associated with this method is resolved. If no handler has been registered then an error
-//   is returned.
-// * If the handler implements Cloneable, it will be cloned and passed the headers for this request.
-// * If the Server has one or more Filters registered, PreInvoke() will be called on each Filter.  Filters are
-//   called in the order registered.  If any Filter returns false, the response returned by the Filter is returned.
-// * Request parameters are validated against the IDL.  If the request violates the IDL an error is returned.
-// * The handler function is invoked
-// * If the Server has one or more Filters registered, PostInvoke() will be called on each Filter.  Filters are
-//   called in the reverse order.  If any Filter returns false, filter execution will stop.
-// * The result/error is returned
+// 1) The method is checked against the IDL.  If the IDL does not define this method an error is returned.
+//
+// 2) The handler associated with this method is resolved. If no handler has been registered then an error
+// is returned.
+//
+// 3) If the handler implements Cloneable, it will be cloned and passed the headers for this request.
+//
+// 4) If the Server has one or more Filters registered, PreInvoke() will be called on each Filter.  Filters are
+// called in the order registered.  If any Filter returns false, the response returned by the Filter is returned.
+//
+// 5) Request parameters are validated against the IDL.  If the request violates the IDL an error is returned.
+//
+// 6) The handler function is invoked
+//
+// 7) If the Server has one or more Filters registered, PostInvoke() will be called on each Filter.  Filters are
+// called in the reverse order.  If any Filter returns false, filter execution will stop.
+//
+// 8) The result/error is returned
 //
 func (s *Server) Call(headers map[string][]string, method string, params ...interface{}) (interface{}, error) {
 
