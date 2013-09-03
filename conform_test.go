@@ -463,6 +463,12 @@ func TestParseIdlJson(t *testing.T) {
 
 }
 
+type BarristerIdlRpcResponse struct {
+	Id     string        `json:"id"`
+	Error  *JsonRpcError `json:"error,omitempty"`
+	Result []IdlJsonElem `json:"result,omitempty"`
+}
+
 func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
 	svr := NewJSONServer(idl, true)

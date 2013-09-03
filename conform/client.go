@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -107,7 +108,7 @@ func parseLine(s string) ConformLine {
 	if len(st) > 0 && string(st[0]) != "#" {
 		cols := strings.Split(s, "|")
 		if len(cols) == 5 {
-			return ConformLine{cols[0], cols[1], cols[2], cols[3], cols[4], "???", "???", barrister.RandStr(16)}
+			return ConformLine{cols[0], cols[1], cols[2], cols[3], cols[4], "???", "???", randHex(16)}
 		}
 	}
 
@@ -152,6 +153,12 @@ func parseFile(fname string) (ParsedFile, error) {
 	file.Close()
 
 	return parsed, nil
+}
+
+func randHex(bytes int) string {
+	buf := make([]byte, bytes)
+	io.ReadFull(rand.Reader, buf)
+	return fmt.Sprintf("%x", buf)
 }
 
 func main() {
