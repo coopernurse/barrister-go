@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-type TypeError struct {
+type typeError struct {
 	// string that describes location of value in the
 	// param or return value graph.  e.g. param[0].Addresses[0].Street1
 	path string
@@ -14,7 +14,7 @@ type TypeError struct {
 	msg string
 }
 
-func (e *TypeError) Error() string {
+func (e *typeError) Error() string {
 	return fmt.Sprintf("barrister: %s: %s", e.path, e.msg)
 }
 
@@ -56,7 +56,7 @@ func (c *convert) run() (reflect.Value, error) {
 		if c.field.Optional && desiredKind == reflect.Ptr {
 			return reflect.ValueOf(c.actual), nil
 		} else {
-			return zeroVal, &TypeError{c.path, "null not allowed"}
+			return zeroVal, &typeError{c.path, "null not allowed"}
 		}
 	}
 
@@ -96,7 +96,7 @@ func (c *convert) run() (reflect.Value, error) {
 						}
 						msg += "'" + enumVal.Value + "'"
 					}
-					return zeroVal, &TypeError{path: c.path, msg: msg}
+					return zeroVal, &typeError{path: c.path, msg: msg}
 				}
 			}
 		}
@@ -192,7 +192,7 @@ func (c *convert) run() (reflect.Value, error) {
 
 	msg := fmt.Sprintf("Unable to convert: %v - %v to %v", c.path,
 		actType.Kind().String(), c.desired)
-	return zeroVal, &TypeError{c.path, msg}
+	return zeroVal, &typeError{c.path, msg}
 }
 
 func (c *convert) convertSlice(actVal reflect.Value) (reflect.Value, error) {
@@ -231,7 +231,7 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 
 	if !ok {
 		msg := fmt.Sprintf("Struct not found in IDL: %s", c.field.Type)
-		return zeroVal, &TypeError{path: c.path, msg: msg}
+		return zeroVal, &typeError{path: c.path, msg: msg}
 	}
 
 	val := reflect.New(c.desired)
@@ -246,7 +246,7 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 			if !ok {
 				msg := fmt.Sprintf("Struct: %v is missing required field: %s",
 					c.desired, goName)
-				return zeroVal, &TypeError{path: c.path, msg: msg}
+				return zeroVal, &typeError{path: c.path, msg: msg}
 			}
 		}
 
@@ -255,7 +255,7 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 		if !ok && !sField.Optional {
 			msg := fmt.Sprintf("Input value: %v is missing required field: %s",
 				m, fname)
-			return zeroVal, &TypeError{path: c.path, msg: msg}
+			return zeroVal, &typeError{path: c.path, msg: msg}
 		}
 
 		if ok {
@@ -271,7 +271,7 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 			if f == zeroVal {
 				msg := fmt.Sprintf("Instance: %s is missing required field: %s",
 					c.field.Type, goName)
-				return zeroVal, &TypeError{path: c.path, msg: msg}
+				return zeroVal, &typeError{path: c.path, msg: msg}
 			}
 
 			if f.Kind() == reflect.Ptr {
@@ -298,7 +298,7 @@ func (c *convert) returnVal(convertedType string) (reflect.Value, error) {
 	if c.field.Type != convertedType {
 		msg := fmt.Sprintf("Type mismatch for '%s' - Expected: %s Got: %v",
 			c.path, c.field.Type, convertedType)
-		return zeroVal, &TypeError{path: c.path, msg: msg}
+		return zeroVal, &typeError{path: c.path, msg: msg}
 	}
 
 	return c.convertedVal()
