@@ -13,6 +13,7 @@ import (
 var strField = &Field{Type: "string", Optional: false, IsArray: false}
 var enumField = &Field{Type: "StringAlias", Optional: false, IsArray: false}
 var arrField = &Field{Type: "float", Optional: false, IsArray: true}
+var optionalArrField = &Field{Type: "string", Optional: true, IsArray: true}
 
 var noNestStruct = &Struct{Name: "NoNesting", Fields: []Field{
 	Field{Name: "a", Type: "string", Optional: true, IsArray: false},
@@ -110,6 +111,9 @@ func TestConvert(t *testing.T) {
 		ConvertTest{"hi", "hi", strField, true},
 		ConvertTest{"", 10, strField, false},
 		ConvertTest{[]float64{1, 2.1, 3}, []interface{}{1, 2.1, 3}, arrField, true},
+		ConvertTest{[]string{}, []interface{}{}, optionalArrField, true},
+		ConvertTest{[]string{""}, []interface{}{""}, optionalArrField, true},
+		ConvertTest{[]string{"1", "2"}, []interface{}{"1", "2"}, optionalArrField, true},
 		ConvertTest{StringAlias("blah"), "blah", enumField, true},
 		ConvertTest{StringAlias("invalid"), "invalid", enumField, false},
 		ConvertTest{NoNesting{A: "hi", B: 30}, map[string]interface{}{"a": "hi", "b": 30}, noNestField, true},

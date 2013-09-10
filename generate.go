@@ -143,7 +143,7 @@ func (g *generateGo) generateStruct(b *bytes.Buffer, s *Struct) {
 			omit = ",omitempty"
 		}
 		line(b, 1, fmt.Sprintf("%s\t%s\t`json:\"%s%s\"`",
-			goName, f.goType(g.optionalToPtr, g.pkgName), f.Name, omit))
+			goName, f.goType(g.idl, g.optionalToPtr, g.pkgName), f.Name, omit))
 	}
 	line(b, 0, "}\n")
 }
@@ -188,10 +188,10 @@ func (g *generateGo) generateInterface(b *bytes.Buffer, ifaceName string) {
 			if x > 0 {
 				params += ", "
 			}
-			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.optionalToPtr, g.pkgName))
+			params += fmt.Sprintf("%s %s", escReserved(p.Name), p.goType(g.idl, g.optionalToPtr, g.pkgName))
 		}
 		line(b, 1, fmt.Sprintf("%s(%s) (%s, error)",
-			goName, params, fn.Returns.goType(g.optionalToPtr, g.pkgName)))
+			goName, params, fn.Returns.goType(g.idl, g.optionalToPtr, g.pkgName)))
 	}
 }
 
@@ -212,7 +212,7 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 	line(b, 0, "}\n")
 	for _, fn := range funcs {
 		method := fmt.Sprintf("%s.%s", ifaceName, fn.Name)
-		retType := fn.Returns.goType(g.optionalToPtr, g.pkgName)
+		retType := fn.Returns.goType(g.idl, g.optionalToPtr, g.pkgName)
 		zeroVal := fn.Returns.zeroVal(g.idl, g.optionalToPtr, g.pkgName)
 		fnName := capitalize(fn.Name)
 		params := ""
@@ -222,7 +222,7 @@ func (g *generateGo) generateProxy(b *bytes.Buffer, ifaceName string) {
 				params += ", "
 			}
 			ident := escReserved(p.Name)
-			params += fmt.Sprintf("%s %s", ident, p.goType(g.optionalToPtr, g.pkgName))
+			params += fmt.Sprintf("%s %s", ident, p.goType(g.idl, g.optionalToPtr, g.pkgName))
 			paramIdents += ", "
 			paramIdents += ident
 		}

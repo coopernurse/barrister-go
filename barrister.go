@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -146,14 +145,16 @@ type Field struct {
 	Comment  string `json:"comment"`
 }
 
-func (f Field) goType(optionalToPtr bool, pkgToStrip string) string {
+func (f Field) goType(idl *Idl, optionalToPtr bool, pkgToStrip string) string {
 	if f.IsArray {
 		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
-		return "[]" + f2.goType(optionalToPtr, pkgToStrip)
+		return "[]" + f2.goType(idl, optionalToPtr, pkgToStrip)
 	}
 
+	_, isStruct := idl.structs[f.Type]
+
 	prefix := ""
-	if optionalToPtr && f.Optional {
+	if f.Optional && (optionalToPtr || isStruct) {
 		prefix = "*"
 	}
 
@@ -178,7 +179,7 @@ func (f Field) zeroVal(idl *Idl, optionalToPtr bool, pkgToStrip string) interfac
 	}
 
 	if f.IsArray {
-		return f.goType(false, pkgToStrip) + "{}"
+		return f.goType(idl, false, pkgToStrip) + "{}"
 	}
 
 	switch f.Type {
@@ -313,7 +314,9 @@ func (idl *Idl) computeStructFields(toAdd *Struct, allFields []Field) []Field {
 // and two packages "usersvc" and "common" are resolved, then "usersvc" will import "myproject/common"
 //
 // optionalToPtr - If true struct fields marked `[optional]` will be generated as Go pointers.  If false,
-// they will be generated as non-pointer types with `omitempty` in the JSON tag
+// they will be generated as non-pointer types with `omitempty` in the JSON tag.  Note: due to the
+// behavior of `encoding/json`, all nested struct fields marked optional will be generated as
+// pointers.  Otherwise there is no way to omit those fields from the struct during marshaling.
 //
 func (idl *Idl) GenerateGo(defaultPkgName string, baseImport string, optionalToPtr bool) map[string][]byte {
 	pkgNameToGoCode := make(map[string][]byte)
@@ -461,7 +464,7 @@ type JsonRpcError struct {
 }
 
 func (e *JsonRpcError) Error() string {
-	return fmt.Sprintf("JsonRpcError: code: %d message: %s", e.Code, e.Message)
+	return fmt.Sprintf("JsonRpcError: code=%d message=%s", e.Code, e.Message)
 }
 
 // JsonRpcResponse represents a JSON-RPC 2.0 Response
@@ -641,26 +644,25 @@ type HttpTransport struct {
 type HttpHook interface {
 	// Called before the HTTP request is made.
 	// Request may be altered, typically to add headers
-	Before(req *http.Request)
+	Before(req *http.Request, body []byte)
 
 	// Called after the request is made, but before the
 	// response is deserialized
-	After(req *http.Request, resp *http.Response)
+	After(req *http.Request, resp *http.Response, body []byte)
 }
 
 func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 
 	req, err := http.NewRequest("POST", t.Url, bytes.NewBuffer(in))
 	if err != nil {
-		msg := fmt.Sprintf("barrister: HttpTransport NewRequest failed: %s", err)
-		return nil, errors.New(msg)
+		return nil, fmt.Errorf("barrister: HttpTransport NewRequest failed: %s", err)
 	}
 
 	// TODO: need to make mime type plugable
 	req.Header.Add("Content-Type", "application/json")
 
 	if t.Hook != nil {
-		t.Hook.Before(req)
+		t.Hook.Before(req, in)
 	}
 
 	client := &http.Client{}
@@ -669,19 +671,21 @@ func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		msg := fmt.Sprintf("barrister: HttpTransport POST to %s failed: %s", t.Url, err)
-		return nil, errors.New(msg)
+		return nil, fmt.Errorf("barrister: HttpTransport POST to %s failed: %s", t.Url, err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("barrister: HttpTransport POST to %s returned non-2xx status: %d - %s", t.Url, resp.StatusCode, resp.Status)
+	}
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		msg := fmt.Sprintf("barrister: HttpTransport Unable to read resp.Body: %s", err)
-		return nil, errors.New(msg)
+		return nil, fmt.Errorf("barrister: HttpTransport Unable to read resp.Body: %s", err)
 	}
 
 	if t.Hook != nil {
-		t.Hook.After(req, resp)
+		t.Hook.After(req, resp, body)
 	}
 
 	return body, nil

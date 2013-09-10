@@ -53,10 +53,10 @@ func (c *convert) run() (reflect.Value, error) {
 	}
 
 	if actType == nil {
-		if c.field.Optional && desiredKind == reflect.Ptr {
+		if c.field.Optional && (desiredKind == reflect.Ptr || desiredKind == reflect.Slice) {
 			return reflect.ValueOf(c.actual), nil
 		} else {
-			return zeroVal, &typeError{c.path, "null not allowed"}
+			return zeroVal, &typeError{c.path, fmt.Sprintf("%v null not allowed", c.field)}
 		}
 	}
 

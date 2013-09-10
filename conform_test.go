@@ -484,8 +484,6 @@ func TestServerBarristerIdl(t *testing.T) {
 		panic(err)
 	}
 
-	//fmt.Printf("%v\n", rpcResp.Result)
-
 	DeepEquals(t, idl.elems, rpcResp.Result)
 }
 
