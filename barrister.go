@@ -1143,8 +1143,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	resp := s.InvokeBytes(req.Header, buf.Bytes())
 	w.Header().Set("Content-Type", s.ser.MimeType())
 
-	// TODO: use w.Write() directly
-	fmt.Fprintf(w, string(resp))
+	// TODO: log err?
+	_, err = w.Write(resp)
 }
 
 // parseMethod takes a JSON-RPC method string and splits it on period, returning
