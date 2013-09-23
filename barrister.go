@@ -491,7 +491,7 @@ type JsonRpcResponse struct {
 // and set the result/error (e.g. to terminate an unauthorized request)
 type RequestResponse struct {
 	// from Transport (e.g. HTTP headers)
-	Headers map[string][]string
+	Headers Headers
 
 	// from JsonRpcRequest
 	Method string
@@ -508,15 +508,21 @@ type RequestResponse struct {
 	Err    error
 }
 
-// GetHeader returns the first header associated with the given
-// key, or an empty string if no header is found with that key
-func (rr RequestResponse) GetHeader(key string) string {
-	xs, ok := rr.Headers[key]
+// GetFirst returns the first value associated with the given
+// key, or an empty string if no value is found with that key
+func GetFirst(m map[string][]string, key string) string {
+	return GetFirstDefault(m, key, "")
+}
+
+// GetFirstDefault returns the first value associated with the given
+// key, or defaultVal if no value is found with that key
+func GetFirstDefault(m map[string][]string, key string, defaultVal string) string {
+	xs, ok := m[key]
 	if ok && len(xs) > 0 {
 		return xs[0]
 	}
 
-	return ""
+	return defaultVal
 }
 
 // toJsonRpcError returns a JsonRpcError with code -32000 and
@@ -785,13 +791,40 @@ type Cloneable interface {
 	// CloneForReq is called after the JSON-RPC request is
 	// decoded, but before the RPC method call is invoked.
 	//
-	// headers is a (potentially empty) map of transport headers
-	// associated with the request.
-	//
 	// A copy of the implementing struct should be returned.
 	// This copy will be used for a single RPC method call and
 	// then discarded.
-	CloneForReq(headers map[string][]string) interface{}
+	CloneForReq(headers Headers) interface{}
+}
+
+// Represents transport request headers/cookies.
+// Handler may mutate Response to send headers back to the caller.
+type Headers struct {
+	// Headers from the request. Handlers should not modify
+	Request map[string][]string
+
+	// Convenience property - only set if transport is HTTP
+	// For other transports this may be nil
+	// Read-only.
+	Cookies []*http.Cookie
+
+	// Writeable map of headers to return on the response
+	// Transport implementations are responsible for
+	// sending values in this map back to the caller.
+	Response map[string][]string
+}
+
+// GetCookie returns the cookie associated with the given
+// name, or nil if no cookie is found with that name.
+func (me Headers) GetCookie(name string) *http.Cookie {
+	if me.Cookies != nil && len(me.Cookies) > 0 {
+		for _, c := range me.Cookies {
+			if c.Name == name {
+				return c
+			}
+		}
+	}
+	return nil
 }
 
 // Filters allow you to intercept requests before and after the handler method
@@ -924,7 +957,7 @@ func (s *Server) validate(idlField Field, implType reflect.Type, path string) {
 //
 // InvokeBytess delegates to InvokeOne and then marshals the result using the
 // Serializer and returns the serialized byte slice.
-func (s *Server) InvokeBytes(headers map[string][]string, req []byte) []byte {
+func (s *Server) InvokeBytes(headers Headers, req []byte) []byte {
 
 	// determine if batch or single
 	batch := s.ser.IsBatch(req)
@@ -968,7 +1001,7 @@ func (s *Server) InvokeBytes(headers map[string][]string, req []byte) []byte {
 
 // InvokeOne handles a single JSON-RPC request, delegating to Call.  If the special "barrister-idl"
 // method is handled, InvokeOne will return the IDL associated with this Server.
-func (s *Server) InvokeOne(headers map[string][]string, rpcReq *JsonRpcRequest) *JsonRpcResponse {
+func (s *Server) InvokeOne(headers Headers, rpcReq *JsonRpcRequest) *JsonRpcResponse {
 	if rpcReq.Method == "barrister-idl" {
 		// handle 'barrister-idl' method
 		return &JsonRpcResponse{Jsonrpc: "2.0", Id: rpcReq.Id, Result: s.idl.elems}
@@ -996,7 +1029,7 @@ func (s *Server) InvokeOne(headers map[string][]string, rpcReq *JsonRpcRequest) 
 // Server can handle (i.e. no additional message routing is performed).  Elements in the returned
 // batch will match the order of the requests.
 //
-func (s *Server) CallBatch(headers map[string][]string, batch []JsonRpcRequest) []JsonRpcResponse {
+func (s *Server) CallBatch(headers Headers, batch []JsonRpcRequest) []JsonRpcResponse {
 	batchResp := make([]JsonRpcResponse, len(batch))
 
 	for _, req := range batch {
@@ -1035,7 +1068,7 @@ func (s *Server) CallBatch(headers map[string][]string, batch []JsonRpcRequest) 
 //
 // 8) The result/error is returned
 //
-func (s *Server) Call(headers map[string][]string, method string, params ...interface{}) (interface{}, error) {
+func (s *Server) Call(headers Headers, method string, params ...interface{}) (interface{}, error) {
 
 	idlFunc, ok := s.idl.methods[method]
 	if !ok {
@@ -1140,8 +1173,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		panic(err)
 	}
 
-	resp := s.InvokeBytes(req.Header, buf.Bytes())
+	headers := Headers{
+		Request:  req.Header,
+		Cookies:  req.Cookies(),
+		Response: make(map[string][]string),
+	}
+
+	resp := s.InvokeBytes(headers, buf.Bytes())
 	w.Header().Set("Content-Type", s.ser.MimeType())
+
+	for k, v := range headers.Response {
+		for _, s := range v {
+			w.Header().Add(k, s)
+		}
+	}
 
 	// TODO: log err?
 	_, err = w.Write(resp)

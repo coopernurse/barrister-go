@@ -119,7 +119,7 @@ type BImpl struct {
 }
 
 // BImpl is Cloneable
-func (i BImpl) CloneForReq(headers map[string][]string) interface{} {
+func (i BImpl) CloneForReq(headers Headers) interface{} {
 	return BImpl{true, &Context{}, make([]string, 0)}
 }
 
@@ -219,7 +219,7 @@ func TestServerCallSuccess(t *testing.T) {
 		GenericCall{"A.calc", []interface{}{[]float64{2, 3}, "multiply"}, float64(6), 0},
 	}
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	for x, generic := range genericCalls {
 		res, err := svr.Call(headers, generic.method, generic.params...)
@@ -273,7 +273,7 @@ func TestServerCallFail(t *testing.T) {
 	svr := NewJSONServer(idl, true)
 	svr.AddHandler("B", bimpl)
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	calls := []CallFail{
 		CallFail{"B.", -32601},
@@ -308,7 +308,7 @@ func TestServerInvokeJSONSuccess(t *testing.T) {
 		EchoCall{"return-null", nil},
 	}
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	for _, call := range calls {
 		req := JsonRpcRequest{Id: "123", Method: "B.echo", Params: []interface{}{call.in}}
@@ -473,7 +473,7 @@ func TestServerBarristerIdl(t *testing.T) {
 	idl := parseTestIdl()
 	svr := NewJSONServer(idl, true)
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	rpcReq := JsonRpcRequest{Id: "123", Method: "barrister-idl", Params: ""}
 	reqJson, _ := json.Marshal(rpcReq)
@@ -535,7 +535,7 @@ func TestFilterOrder(t *testing.T) {
 		}
 	}
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	// add filter twice with different IDs
 	svr.AddFilter(ProxyFilter{createPre(1), createPost(1)})
@@ -593,7 +593,7 @@ func TestCloneModifiesHandler(t *testing.T) {
 
 	svr.AddFilter(ProxyFilter{pre, post})
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	r := resultOk(svr.Call(headers, "B.echo", "get-userid"))
 	s, ok := r.(*string)
@@ -627,7 +627,7 @@ func TestFilterReturnErr(t *testing.T) {
 		return true
 	}
 
-	headers := make(map[string][]string)
+	headers := newHeaders()
 
 	svr.AddFilter(ProxyFilter{pre, post})
 	svr.AddFilter(ProxyFilter{pre, post})
@@ -644,5 +644,12 @@ func TestFilterReturnErr(t *testing.T) {
 	}
 	if postCount != 0 {
 		t.Errorf("postCount != 0: %d", postCount)
+	}
+}
+
+func newHeaders() Headers {
+	return Headers{
+		Request:  make(map[string][]string),
+		Response: make(map[string][]string),
 	}
 }

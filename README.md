@@ -138,11 +138,11 @@ type MySecureService struct {
 }
 
 // implements Cloneable interface
-func (s MySecureService) CloneForReq(headers map[string][]string) interface{} {
+func (s MySecureService) CloneForReq(headers Headers) interface{} {
 	userId := ""
+	cookie := barrister.GetFirst(headers.Request, "MySecureCookie")
 
-	if len(headers["MySecureCookie"]) > 0 {
-		cookie := headers["MySecureCookie"][0]
+	if cookie != "" {
 		// decode cookie somehow, perhaps returning empty string on failure
         userId = decodeUserId(cookie)
 	}
