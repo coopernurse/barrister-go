@@ -195,7 +195,11 @@ func (f Field) zeroVal(idl *Idl, optionalToPtr bool, pkgToStrip string) interfac
 
 	s, ok := idl.structs[f.Type]
 	if ok {
-		return capitalizeAndStripMatchingPkg(s.Name, pkgToStrip) + "{}"
+		if f.Optional {
+			return "nil"
+		} else {
+			return capitalizeAndStripMatchingPkg(s.Name, pkgToStrip) + "{}"
+		}
 	}
 
 	e, ok := idl.enums[f.Type]
