@@ -70,7 +70,7 @@ func (c *convert) run() (reflect.Value, error) {
 
 	actVal := reflect.ValueOf(c.actual)
 
-	//fmt.Printf("convert: idl: %s go: %s actual: %s\n", c.field.Type, kind, actType)
+	//fmt.Printf("convert: idl: %s go: %s actual: %s\n", c.field.Type, desiredKind, actType)
 
 	if actType.Kind() == desiredKind {
 		switch desiredKind {

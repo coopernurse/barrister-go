@@ -213,11 +213,24 @@ func (f Field) zeroVal(idl *Idl, optionalToPtr bool, pkgToStrip string) interfac
 }
 
 func (f Field) testVal(idl *Idl) interface{} {
+	return f.testValRecur(idl, make(map[string]interface{}))
+}
+
+func (f Field) testValRecur(idl *Idl, seenTypes map[string]interface{}) interface{} {
 
 	if f.IsArray {
+		key := fmt.Sprintf("array %s", f.Type)
+		_, ok := seenTypes[key]
+		if ok {
+			// we've seen this array type, so return
+			// an empty slice now to avoid cycles
+			return make([]interface{}, 0)
+		}
+
 		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
-		arr := []interface{}{}
-		arr = append(arr, f2.testVal(idl))
+		arr := make([]interface{}, 1, 1)
+		seenTypes[key] = arr
+		arr[0] = f2.testValRecur(idl, seenTypes)
 		return arr
 	}
 
@@ -234,9 +247,16 @@ func (f Field) testVal(idl *Idl) interface{} {
 
 	s, ok := idl.structs[f.Type]
 	if ok {
+		key := fmt.Sprintf("struct %s", f.Type)
+		seenVal, ok := seenTypes[key]
+		if ok {
+			return seenVal
+		}
+
 		val := map[string]interface{}{}
+		seenTypes[key] = val
 		for _, f2 := range s.allFields {
-			val[f2.Name] = f2.testVal(idl)
+			val[f2.Name] = f2.testValRecur(idl, seenTypes)
 		}
 		return val
 	}
@@ -246,8 +266,7 @@ func (f Field) testVal(idl *Idl) interface{} {
 		return e[0].Value
 	}
 
-	msg := fmt.Sprintf("Unable to create val for field: %s type: %s",
-		f.Name, f.Type)
+	msg := fmt.Sprintf("Unable to create val for field: %s type: %s", f.Name, f.Type)
 	panic(msg)
 }
 
