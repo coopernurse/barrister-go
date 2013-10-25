@@ -150,7 +150,7 @@ func (f Field) goType(idl *Idl, optionalToPtr bool, pkgToStrip string) string {
 		f2 := Field{f.Name, f.Type, false, false, ""}
 
 		prefix := "[]"
-		if f.Optional {
+		if f.Optional && optionalToPtr {
 			prefix = "*[]"
 		}
 		return prefix + f2.goType(idl, optionalToPtr, pkgToStrip)
