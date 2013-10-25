@@ -147,8 +147,13 @@ type Field struct {
 
 func (f Field) goType(idl *Idl, optionalToPtr bool, pkgToStrip string) string {
 	if f.IsArray {
-		f2 := Field{f.Name, f.Type, f.Optional, false, ""}
-		return "[]" + f2.goType(idl, optionalToPtr, pkgToStrip)
+		f2 := Field{f.Name, f.Type, false, false, ""}
+
+		prefix := "[]"
+		if f.Optional {
+			prefix = "*[]"
+		}
+		return prefix + f2.goType(idl, optionalToPtr, pkgToStrip)
 	}
 
 	_, isStruct := idl.structs[f.Type]
