@@ -107,7 +107,7 @@ func (g *generateGo) generateIdlJson(b *bytes.Buffer) {
 	}
 	idlstr := strings.Replace(string(idlbytes), "`", "`+\"`\"+`", -1)
 	line(b, 0, "")
-	line(b, 0, "const IdlJsonRaw = `"+idlstr+"`")
+	line(b, 0, "var IdlJsonRaw = `"+idlstr+"`")
 }
 
 func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
