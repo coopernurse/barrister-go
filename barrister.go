@@ -844,7 +844,7 @@ type Headers struct {
 
 // GetCookie returns the cookie associated with the given
 // name, or nil if no cookie is found with that name.
-func (me Headers) GetCookie(name string) *http.Cookie {
+func (me *Headers) GetCookie(name string) *http.Cookie {
 	if me.Cookies != nil && len(me.Cookies) > 0 {
 		for _, c := range me.Cookies {
 			if c.Name == name {
@@ -853,6 +853,43 @@ func (me Headers) GetCookie(name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+// ReadCookies is taken from the net/http cookie.go standard library
+// and populates Headers.Cookies from Headers.Request["Cookie"]
+func (me *Headers) ReadCookies() {
+	cookies := []*http.Cookie{}
+	lines, ok := me.Request["Cookie"]
+	if ok {
+		for _, line := range lines {
+			parts := strings.Split(strings.TrimSpace(line), ";")
+			if len(parts) == 1 && parts[0] == "" {
+				continue
+			}
+			// Per-line attributes
+			parsedPairs := 0
+			for i := 0; i < len(parts); i++ {
+				parts[i] = strings.TrimSpace(parts[i])
+				if len(parts[i]) == 0 {
+					continue
+				}
+				name, val := parts[i], ""
+				if j := strings.Index(name, "="); j >= 0 {
+					name, val = name[:j], name[j+1:]
+				}
+				if !isCookieNameValid(name) {
+					continue
+				}
+				val, success := parseCookieValue(val)
+				if !success {
+					continue
+				}
+				cookies = append(cookies, &http.Cookie{Name: name, Value: val})
+				parsedPairs++
+			}
+		}
+	}
+	me.Cookies = cookies
 }
 
 // Filters allow you to intercept requests before and after the handler method
