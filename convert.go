@@ -277,7 +277,7 @@ func (c *convert) convertStruct(m map[string]interface{}) (reflect.Value, error)
 			if f.Kind() == reflect.Ptr {
 				if conv.Kind() == reflect.Ptr {
 					f.Set(conv)
-				} else {
+				} else if conv.CanAddr() {
 					f.Set(conv.Addr())
 				}
 			} else {
