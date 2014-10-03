@@ -22,6 +22,8 @@ go install github.com/coopernurse/barrister-go/idl2go
 
 ## Run example
 
+### HTTP transport
+
 ```sh
 # Generate Go code from calc.idl
 cd $GOPATH/src/github.com/coopernurse/barrister-go/example
@@ -32,6 +34,30 @@ go run server.go &
 
 # Compile and run client
 go run client.go
+```
+
+### Iris transport
+
+Iris is a messaging system that maps very cleanly to JSON-RPC request/response semantics.
+Iris provides a clusterable message relay that eliminates the need to manually wire 
+endpoints together, which in a micro service architecture is quite helpful.
+
+Barrister Iris support is very preliminary, but you can run a simple example by:
+
+```sh
+# Fetch Iris Go client
+go get gopkg.in/project-iris/iris-go.v1
+
+# Generate Go code from calc.idl
+cd $GOPATH/src/github.com/coopernurse/barrister-go/example
+barrister calc.idl | $GOPATH/bin/idl2go -i -p calc
+
+# Compile and run server in background
+go run iris-calc-server.go &
+
+# Compile and run client
+go run iris-calc-client.go
+
 ```
 
 ## API documentation
