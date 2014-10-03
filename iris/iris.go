@@ -9,7 +9,7 @@ import (
 type IrisTransport struct {
 	App     string
 	Timeout time.Duration
-	Conn    iris.Connection
+	Conn    *iris.Connection
 }
 
 func (t *IrisTransport) Send(in []byte) ([]byte, error) {
@@ -20,16 +20,18 @@ type IrisHandler struct {
 	Server barrister.Server
 }
 
+func (h *IrisHandler) Init(conn *iris.Connection) error { return nil }
+
 func (h *IrisHandler) HandleBroadcast(msg []byte) {
 	panic("Broadcast passed to request handler")
 }
 
-func (h *IrisHandler) HandleRequest(req []byte) []byte {
-	headers := make(map[string][]string)
-	return h.Server.InvokeBytes(headers, req)
+func (h *IrisHandler) HandleRequest(req []byte) ([]byte, error) {
+	headers := barrister.Headers{}
+	return h.Server.InvokeBytes(headers, req), nil
 }
 
-func (h *IrisHandler) HandleTunnel(tun iris.Tunnel) {
+func (h *IrisHandler) HandleTunnel(tun *iris.Tunnel) {
 	panic("Inbound tunnel on request handler")
 }
 
