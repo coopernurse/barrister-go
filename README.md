@@ -20,6 +20,15 @@ go get github.com/coopernurse/barrister-go
 go install github.com/coopernurse/barrister-go/idl2go
 ```
 
+## Run tests
+
+To run the included unit tests:
+
+```sh
+go get github.com/couchbaselabs/go.assert
+go test
+```
+
 ## Run example
 
 ### HTTP transport
