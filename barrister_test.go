@@ -3,11 +3,14 @@ package barrister
 import (
 	"encoding/json"
 	"fmt"
-	. "github.com/couchbaselabs/go.assert"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"reflect"
 	"testing"
+	"time"
+
+	. "github.com/couchbaselabs/go.assert"
 )
 
 var strField = &Field{Type: "string", Optional: false, IsArray: false}
@@ -149,6 +152,52 @@ func TestConvert(t *testing.T) {
 				msg, test.input, reflect.TypeOf(test.target).Name(), val.Interface())
 		}
 	}
+}
+
+func TestHttpTransport_Send_DefaultHTTPClient(t *testing.T) {
+	data := []byte("test")
+
+	srv := &http.Server{
+		Addr: ":18080",
+		Handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			rw.WriteHeader(http.StatusOK)
+			rw.Write(data)
+		}),
+	}
+	go srv.ListenAndServe()
+	defer srv.Close()
+
+	transport := HttpTransport{
+		Url: "http://localhost:18080/rpc",
+	}
+
+	resp, err := transport.Send([]byte{})
+
+	DeepEquals(t, resp, data)
+	Equals(t, err, nil)
+}
+
+func TestHttpTransport_Send_CustomHTTPClientWithTimeout(t *testing.T) {
+	const timeout = 100 * time.Millisecond
+
+	srv := &http.Server{
+		Addr: ":18080",
+		Handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			time.Sleep(2 * timeout)
+			rw.WriteHeader(http.StatusOK)
+		}),
+	}
+	go srv.ListenAndServe()
+	defer srv.Close()
+
+	transport := HttpTransport{
+		Url:    "http://localhost:18080/rpc",
+		Client: &http.Client{Timeout: timeout},
+	}
+
+	_, err := transport.Send([]byte{})
+
+	NotEquals(t, err, nil)
 }
 
 func TestAddHandlerPanicsIfIfaceNotInIdl(t *testing.T) {
