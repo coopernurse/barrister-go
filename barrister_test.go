@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"net"
+
 	. "github.com/couchbaselabs/go.assert"
 )
 
@@ -158,13 +160,17 @@ func TestHttpTransport_Send_DefaultHTTPClient(t *testing.T) {
 	data := []byte("test")
 
 	srv := &http.Server{
-		Addr: ":18080",
 		Handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			rw.WriteHeader(http.StatusOK)
 			rw.Write(data)
 		}),
 	}
-	go srv.ListenAndServe()
+	ln, err := net.Listen("tcp", ":18080")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	go srv.Serve(ln)
 	defer srv.Close()
 
 	transport := HttpTransport{
@@ -181,13 +187,17 @@ func TestHttpTransport_Send_CustomHTTPClientWithTimeout(t *testing.T) {
 	const timeout = 100 * time.Millisecond
 
 	srv := &http.Server{
-		Addr: ":18080",
 		Handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			time.Sleep(2 * timeout)
 			rw.WriteHeader(http.StatusOK)
 		}),
 	}
-	go srv.ListenAndServe()
+	ln, err := net.Listen("tcp", ":18080")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	go srv.Serve(ln)
 	defer srv.Close()
 
 	transport := HttpTransport{
@@ -195,7 +205,7 @@ func TestHttpTransport_Send_CustomHTTPClientWithTimeout(t *testing.T) {
 		Client: &http.Client{Timeout: timeout},
 	}
 
-	_, err := transport.Send([]byte{})
+	_, err = transport.Send([]byte{})
 
 	NotEquals(t, err, nil)
 }
