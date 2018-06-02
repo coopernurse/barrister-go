@@ -668,7 +668,11 @@ type HttpTransport struct {
 	// Optional hook to invoke before/after requests
 	Hook HttpHook
 
+	// Optional custom HTTP client to be used instead of the default empty one.
+	Client *http.Client
+
 	// Optional CookieJar - useful if endpoint uses session cookies
+	// Deprecated by custom Client option. If you need to provide CookieJar, provide a &http.Client{Jar: YourCookie}
 	Jar http.CookieJar
 }
 
@@ -699,7 +703,11 @@ func (t *HttpTransport) Send(in []byte) ([]byte, error) {
 		t.Hook.Before(req, in)
 	}
 
-	client := &http.Client{}
+	client := t.Client
+	if client == nil {
+		client = &http.Client{}
+	}
+
 	if t.Jar != nil {
 		client.Jar = t.Jar
 	}
