@@ -1,26 +1,22 @@
 package barrister
 
 import (
-	"testing"
-	"fmt"
 	"bytes"
+	"fmt"
+	"testing"
 )
 
 func TestGenerateEnum(t *testing.T) {
 	for i, tc := range []struct {
-		enums map[string][]EnumValue
-		res []byte
+		enums []EnumValue
+		res   []byte
 	}{
 		{
-			map[string][]EnumValue{
-				"asdf": {EnumValue{Value: "foo"}},
-			},
+			[]EnumValue{EnumValue{Value: "foo"}},
 			[]byte("type Asdf string\nconst (\n	AsdfFoo Asdf = \"foo\"\n)\n\n"),
-	},
+		},
 		{
-			map[string][]EnumValue{
-				"asdf": {EnumValue{Value: "foo"}, EnumValue{Value: "bar"}},
-			},
+			[]EnumValue{EnumValue{Value: "foo"}, EnumValue{Value: "bar"}},
 			[]byte("type Asdf string\nconst (\n	AsdfFoo Asdf = \"foo\"\n	AsdfBar Asdf = \"bar\"\n)\n\n"),
 		},
 	} {
@@ -30,7 +26,9 @@ func TestGenerateEnum(t *testing.T) {
 
 			g := &generateGo{
 				idl: &Idl{
-					enums: tc.enums,
+					enums: map[string][]EnumValue{
+						"asdf": tc.enums,
+					},
 				},
 			}
 
