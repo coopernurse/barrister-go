@@ -120,13 +120,9 @@ func (g *generateGo) generateEnum(b *bytes.Buffer, enumName string) {
 	goName := capitalizeAndStripMatchingPkg(enumName, g.pkgName)
 	line(b, 0, fmt.Sprintf("type %s string", goName))
 	line(b, 0, "const (")
-	for x, val := range vals {
-		typeStr := ""
-		if x == 0 {
-			typeStr = goName
-		}
+	for _, val := range vals {
 		line(b, 1, fmt.Sprintf("%s%s %s = \"%s\"",
-			goName, capitalize(val.Value), typeStr, val.Value))
+			goName, capitalize(val.Value), goName, val.Value))
 	}
 	line(b, 0, ")\n")
 }
